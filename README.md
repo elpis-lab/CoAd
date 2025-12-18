@@ -1,2 +1,3 @@
-# goal-regions
-Experience-based planner using Task Space Regions to represent workspace goals
+# Planning with Goal Regions
+Experience-based planner with goal regions.
+
