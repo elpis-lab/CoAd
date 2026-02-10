@@ -71,7 +71,7 @@ class BoxIndex4D:
 
 class SparseBoxGrid4D:
     def __init__(self, keys_arr):
-        ...
+        
         mins = keys_arr[:, :, 0].astype(np.float64)
         maxs = keys_arr[:, :, 1].astype(np.float64)
 
@@ -145,7 +145,6 @@ def main():
                         max_FPS = 200
                     ))
 
-    robotURDF = "/home/adilshiyas/ros1/src/robowflex_resources/panda/urdf/panda.urdf"
     robotURDF = "robowflex_resources/panda/urdf/panda.urdf"
 
     robot_base_position = (0, 0, 0)
@@ -236,31 +235,6 @@ def main():
 
             print(path[-1])
 
-            #print(f"Total time: {query_time+time_load:.6f} seconds")
-            '''
-            goal = np.array([round(x, 3) for x in path[-1]])
-            
-            planner = omplPlanner(robot)
-            
-            planning_start = time.perf_counter()
-            planned_path = planner.omplPlan(
-                qpos_goal=goal,
-                qpos_start=homePos,
-                timeout=10.0,
-                num_waypoints=200,
-                planner="RRTConnect"
-            )
-            print(f"PFS time: {time.perf_counter()-planning_start:.6f} seconds")
-            planned_goal = np.array([round(x, 3) for x in planned_path[-1].tolist()])
-
-            print(planned_goal)
-            print(goal)
-
-            #print(planned_goal!=goal)
-            if (list(planned_goal)!=list(goal)):
-                print("PLANNING FAILED!")
-            '''
-            
             input("Visualize?")
             path = torch.from_numpy(path.copy())
             for waypoint in path:

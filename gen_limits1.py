@@ -308,10 +308,36 @@ def to_py(obj):
         return [to_py(v) for v in obj]
     return obj
 
+def _to_numpy_path(x, dtype):
+
+    if x is None:
+        return np.empty((0, 0), dtype=dtype)
+
+    if isinstance(x, torch.Tensor):
+        return x.detach().cpu().numpy().astype(dtype, copy=False)
+
+    if isinstance(x, (list, tuple)):
+        if len(x) == 0:
+            return np.empty((0, 0), dtype=dtype)
+
+        rows = []
+        for xi in x:
+            if isinstance(xi, torch.Tensor):
+                xi = xi.detach().cpu().numpy()
+            else:
+                xi = np.asarray(xi)
+            rows.append(xi)
+
+        arr = np.stack(rows, axis=0)  
+        return arr.astype(dtype, copy=False)
+
+    return np.asarray(x, dtype=dtype)
+
 def pack_paths_from_dict(path_dict, *, path_dtype=np.float32, key_dtype=None):
 
     keys_list = list(path_dict.keys())
-    raw_paths = [np.asarray(path_dict[k], dtype=path_dtype) for k in keys_list]
+    #raw_paths = [np.asarray(path_dict[k], dtype=path_dtype) for k in keys_list]
+    raw_paths = [_to_numpy_path(path_dict[k], dtype=path_dtype) for k in keys_list]
 
     # 1) Find first non-empty path to infer D
     nonempty = [p for p in raw_paths if p.size > 0]
@@ -400,6 +426,37 @@ def rmin_rmax_from_square_corners(tw1, tw2, nominal_pose=[0, 0, 0]):
     r_max = np.sqrt(r2.max())
 
     return r_min, r_max       
+
+def consolidate_paths_IK(robot, path1, path2):
+
+    consolidated_bool = True
+
+    path1_goal = path1[-1]
+    path2_goal = path2[-1]
+    q1 = np.asarray(path1_goal).reshape(1, -1)  # (1, nq)
+    q2 = np.asarray(path2_goal).reshape(1, -1)  # (1, nq)
+    
+
+    #path1_w_goal = robot.forward_kinematics(path1_goal)
+    #path2_w_goal = robot.forward_kinematics(path2_goal)
+    path1_w_goal = robot.forward_kinematics(q1, envs_idx=0)
+    path2_w_goal = robot.forward_kinematics(q2, envs_idx=0)
+
+    delta_q_goal = []
+    delta_w_goal = []
+
+    for i in range(len(path1_goal)):
+
+        curr_delta = path2_goal[i]-path1_goal[i]
+        delta_q_goal.append(curr_delta)
+
+    for i in range(len(path1_w_goal)):
+
+        curr_w_delta = path2_w_goal[i]-path1_w_goal[i]
+        delta_w_goal.append(curr_w_delta)
+
+    return delta_q_goal, delta_w_goal
+    return consolidated_bool
 
 # Parallel OMPL stuff
 
@@ -522,13 +579,13 @@ def submit_plans(executor, jobs):
 def main():
     #gs.init(backend=gs.cpu, logging_level='error')
 
-    parallelize = True
+    parallelize = False
     perf_mode = False
     cpu = 8
-    n_envs = 6
+    n_envs = 1
 
 
-    gs.init(backend=gs.gpu, performance_mode=perf_mode)
+    gs.init(backend=gs.cpu, performance_mode=perf_mode)
 
     scene = gs.Scene(show_viewer=(not parallelize), show_FPS=False)
 
@@ -554,7 +611,7 @@ def main():
     # Placing the object anywhere on the XY plane within the reachable workspace
     #object_radius = 0.04
     #object_height = 0.2
-    object_size = [0.06, 0.06, 0.2]
+    object_size = [0.04, 0.04, 0.2]
 
     object_position = [0.4, 0.0, 0.1]
     object_quat = [0, 0, 0, 1]
@@ -564,7 +621,7 @@ def main():
     object_position = nominal_object_pose
 
     robot_clearance = 0.3
-    reachable_ws = 0.306
+    reachable_ws = 0.301
 
     object_dist = [0.1, 0.1, 0, np.pi]
     object_dist = [reachable_ws, reachable_ws, 0, 0*np.pi]
@@ -955,7 +1012,7 @@ def main():
 
 
 
-    homePos = [0, -0.785, 0, -2.356, 0, 1.571, 0.785, 0.065, 0.065]
+    homePos = [0, -0.785, 0, -2.356, 0, 1.571, 0.785, 0.0399, 0.0399]
 
     iTSR_paths = {}
 
@@ -1135,7 +1192,8 @@ def main():
                         
                         seeds[env_id] = q.detach().cpu().numpy()
                         #seeds[env_id]    = q          # warm-start next loop from this q
-                        q[-1] = 0.065; q[-2] = 0.065
+                        #q[-1] = 0.065; q[-2] = 0.065
+                        q[-1] = 0.04; q[-2] = 0.04
                         q_batch[env_id]  = q.detach().cpu().numpy()
                         moved.append(env_id)
 
@@ -1238,14 +1296,23 @@ def main():
                 plane = scene.add_entity(gs.morphs.Plane())
                 scene.build(n_envs=n_envs, env_spacing=(1.0, 1.0))
                 
-                for env_idx in range(n_envs):
+                envs_to_use = min(n_envs, len(range(i, len(iTSR_set))))
+
+                for env_idx in range(envs_to_use):
                     volumes = find_swept_volume(scene, object_size, keylist[i+env_idx], volumes=volumes, env_idx=[env_idx])  
+
+                #for env_idx in range(n_envs):
+                #    volumes = find_swept_volume(scene, object_size, keylist[i+env_idx], volumes=volumes, env_idx=[env_idx])  
 
             else:
                 #volumes = find_swept_volume(object_size, key, volumes=volumes, env_idx=None)  
-                for env_idx in range(n_envs):
-                    volumes = find_swept_volume(scene, object_size, keylist[i+env_idx], volumes=volumes, env_idx=[env_idx])  
+                #for env_idx in range(n_envs):
+                #    volumes = find_swept_volume(scene, object_size, keylist[i+env_idx], volumes=volumes, env_idx=[env_idx])  
 
+                envs_to_use = min(n_envs, len(range(i, len(iTSR_set))))
+
+                for env_idx in range(envs_to_use):
+                    volumes = find_swept_volume(scene, object_size, keylist[i+env_idx], volumes=volumes, env_idx=[env_idx])  
 
             robot.set_dofs_position(
                 torch.tile(
@@ -1258,7 +1325,8 @@ def main():
             
             iTSR = iTSR_set[key][0]
 
-            current_keys = keylist[i : i+n_envs]
+            #current_keys = keylist[i : i+n_envs]
+            current_keys = keylist[i : i+envs_to_use]
             iTSR_batch = [
                 iTSR_set[curr_key][0] for curr_key in current_keys
             ]
@@ -1303,6 +1371,7 @@ def main():
             
                 idx = np.nonzero(alive)[0]
                 idx = np.array(list(range(n_envs)))
+                idx = np.array(list(range(envs_to_use)))
                 #print(idx)
                 B_temp = idx.size
                 attempts[idx] += 1
@@ -1349,7 +1418,8 @@ def main():
                     init_qpos=seeds,                # <<< USE THE SEEDS
                     return_error=True,
                     pos_tol=5e-4, rot_tol=5e-3,          # sane tolerances (yours were ~1e-10: too tight)
-                    envs_idx=idx
+                    envs_idx=idx,
+                    dofs_idx_local=[0, 1, 2, 3, 4, 5, 6]
                 )
 
                 moved = []
@@ -1362,24 +1432,36 @@ def main():
                     
                     seeds[env_id] = q.detach().cpu().numpy()
                     #seeds[env_id]    = q          # warm-start next loop from this q
-                    q[-1] = 0.065; q[-2] = 0.065
+                    #q[-1] = 0.065; q[-2] = 0.065
+                    #q[-1] = 0.04; q[-2] = 0.04
                     q_batch[env_id]  = q.detach().cpu().numpy()
                     moved.append(env_id)
 
                 q_delta = q_batch - old_q
                 q_delta_means = np.mean(q_delta, axis=1)
 
-
+                #print(f"Moved: {moved}")
+                
                 if moved:
                     moved = np.asarray(moved, dtype=int)
-                    robot.set_dofs_position(q_batch[moved], envs_idx=moved)
-                    scene.step()
+                    robot.set_dofs_position(q_batch[moved], envs_idx=moved, zero_velocity=True)
+                    #robot.set_qpos(q_batch[moved], envs_idx=moved, zero_velocity=True)
+                    #scene.step()
+                    #print(f"q_batch[moved]: {q_batch[moved]}")
                     for env_id in moved:
                         col = robot.detect_collision(env_idx=env_id)
+                        #print(f"Col: {col}")
+                        #input("Proceed?")
+
                         if getattr(col, "size", 0)==0:
                             if not ik_ok[env_id]:
                                 # Cache the FIRST valid IK for this environment
                                 q_sol[env_id] = q_batch[env_id].copy()
+                                robot.set_dofs_position(q_sol[env_id][None, :], envs_idx=[env_id], zero_velocity=True)
+                                col2 = robot.detect_collision(env_idx=env_id)
+                                #scene.step()
+                                #print(f"q_sol[env_id]: {q_sol[env_id]}")
+                                #print(f"Col2: {col2}")
                             ik_ok[env_id] = True
                             alive[env_id] = False
                             have_target[env_id] = False
@@ -1410,7 +1492,8 @@ def main():
                 
                 if not ik_ok[b]:
                     print(f"Planning for IK failure. Planning failure expected. Key index:{i+b}")
-
+                
+                #print(f"Goal to plan to: {np.array(list(q_sol[b]))}")
                 path = planner.omplPlan(
                     #qpos_goal = np.array(list(q_batch[b])),
                     qpos_goal = np.array(list(q_sol[b])),
@@ -1450,7 +1533,8 @@ def main():
             #planning_failures += num_failed
 
             print(f"[batch] planned={len(current_keys)-curr_failed}, failed={curr_failed}")
-            print(f"Planning complete: {i}-{i+n_envs}")
+            #print(f"Planning complete: {i}-{i+n_envs}")
+            print(f"Planning complete: {i}-{i+envs_to_use}")
 
             #path = planner.omplPlan(
             #    qpos_goal = q_batch,
@@ -1462,7 +1546,8 @@ def main():
             current_time = time.perf_counter()
             print(f"Planning time: {current_time - planning_start:.6f} seconds")
 
-            print(f"KEYS TO GO: {len(iTSR_set)-i-n_envs}")
+            #print(f"KEYS TO GO: {len(iTSR_set)-i-n_envs}")
+            print(f"KEYS TO GO: {len(iTSR_set)-i-envs_to_use}")
 
 
     print("Paths generated for all object positions")
@@ -1502,5 +1587,16 @@ def main():
         #scene.step()
         #print(time.time())
 
+    '''
+    # Consolidate number of paths
+    iTSR_keys = list(iTSR_paths.keys())
+    path1 = iTSR_paths[iTSR_keys[0]]
+    path2 = iTSR_paths[iTSR_keys[1]]
+
+    delta_q, delta_w = consolidate_paths_IK(robot, path1, path2)
+    print(delta_q)
+    print(delta_w)
+    '''
+    
 if __name__=="__main__":
     main()
