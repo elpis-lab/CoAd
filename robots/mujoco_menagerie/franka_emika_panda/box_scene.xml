@@ -1,0 +1,49 @@
+
+	<mujoco model="test_world">
+	<include file="scene.xml"/>
+	<worldbody>
+	<body name="scene_box" pos="0 0 0">
+  <geom name="base" type="box" pos="0.8 0 0.44" quat="1 0 0 0" size="0.35 0.35 0.02" contype="1" conaffinity="1" rgba="0.6 0.6 0.6 1"/>
+  <geom name="side_left" type="box" pos="0.8 -0.35 0.625" quat="1 0 0 0" size="0.35 0.02 0.175" contype="1" conaffinity="1" rgba="0.6 0.6 0.6 1"/>
+  <geom name="side_right" type="box" pos="0.8 0.35 0.625" quat="1 0 0 0" size="0.35 0.02 0.175" contype="1" conaffinity="1" rgba="0.6 0.6 0.6 1"/>
+  <geom name="side_front" type="box" pos="0.45 0 0.6" quat="1 0 0 0" size="0.02 0.35 0.15" contype="1" conaffinity="1" rgba="0.6 0.6 0.6 1"/>
+  <geom name="side_cap" type="box" pos="0.9 0 1" quat="0.924 0 0.383 0" size="0.35 0.35 0.02" contype="1" conaffinity="1" rgba="0.6 0.6 0.6 1"/>
+  <geom name="side_back" type="box" pos="1.15 0 0.625" quat="1 0 0 0" size="0.02 0.35 0.175" contype="1" conaffinity="1" rgba="0.6 0.6 0.6 1"/>
+</body>
+	<body name="swept_volume" pos="0.5683149999999999 -0.220995 0.535">
+		<joint name="swept_volume_free" type="free"/>
+
+		<!-- boxes centered at body origin -->
+		<geom name="sv_box1" type="box" pos="0 0 0"
+			size="0.029604999999999985 0.008395 0.075"
+			rgba="0.8 0.8 0.8 1"/>
+
+		<geom name="sv_box2" type="box" pos="0 0 0"
+			size="0.008394999999999986 0.029605 0.075"
+			rgba="0.8 0.8 0.8 1"/>
+
+		<!-- cylinders at local corner offsets -->
+		<geom name="sv_cyl1" type="cylinder"
+			pos="-0.00839499999999993 -0.008395000000000014 0.0"
+			size="0.02121 0.075"
+			rgba="0.8 0.8 0.8 1"/>
+
+		<geom name="sv_cyl2" type="cylinder"
+			pos="-0.00839499999999993 0.008394999999999986 0.0"
+			size="0.02121 0.075"
+			rgba="0.8 0.8 0.8 1"/>
+
+		<geom name="sv_cyl3" type="cylinder"
+			pos="0.008395000000000041 -0.008395000000000014 0.0"
+			size="0.02121 0.075"
+			rgba="0.8 0.8 0.8 1"/>
+
+		<geom name="sv_cyl4" type="cylinder"
+			pos="0.008395000000000041 0.008394999999999986 0.0"
+			size="0.02121 0.075"
+			rgba="0.8 0.8 0.8 1"/>
+	</body>
+	
+		</worldbody>
+	</mujoco>
+	
