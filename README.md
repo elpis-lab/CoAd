@@ -8,3 +8,4 @@ Experience-based planner with goal regions.
 
 * Condensation currently has an early exit at 50% (to avoid running for too long)
 * All helper functions and classes are in utils/ src/ and planning_mj.py
+* robots/ contains files from [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie)
