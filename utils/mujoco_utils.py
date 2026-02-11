@@ -872,7 +872,7 @@ class PandaMinkIK:
 			try:
 				vel = solve_ik(self.configuration, tasks,
 								constraints=[self.finger_freezing_task],
-								#limits=limits,
+								limits=limits,
 								dt=self.dt,
 								solver="daqp")
 			except NoSolutionFound:
