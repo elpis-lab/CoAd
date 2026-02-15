@@ -8,7 +8,7 @@ Experience-based planner with goal regions.
 
 * Condensation currently has an early exit at 50% (to avoid running for too long)
 * All helper functions and classes are in utils/ src/ and planning_mj.py
-* robots/ contains files from [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie)
+* assets/ contains files from [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie)
 
 * Some generated data structures can be found [here](https://drive.google.com/drive/folders/1wnXFksH5Kiec5IVMeo7Up51Fm-Xq73-X?usp=drive_link)
 * Free case data structures are large (many bins)

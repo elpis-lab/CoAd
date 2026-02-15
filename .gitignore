@@ -16,6 +16,8 @@ results/
 # Virtual envs
 venv/
 .env/
-robots/mujoco_menagerie/franka_emika_panda/free_top_scene.xml
-robots/mujoco_menagerie/franka_emika_panda/box_scene.xml
-robots/mujoco_menagerie/franka_emika_panda/box_scene.xml
+
+# TODO
+assets/mujoco_menagerie/franka_emika_panda/free_top_scene.xml
+assets/mujoco_menagerie/franka_emika_panda/box_scene.xml
+assets/mujoco_menagerie/franka_emika_panda/box_scene.xml
