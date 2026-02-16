@@ -3,7 +3,7 @@ import numpy as np
 import mujoco
 import mink
 
-from mujoco_utils import joint_names_to_qpos_dof_ids
+from mujoco_utils import joints_to_qpos_dof_ids, sample_qpos
 
 
 class IK:
@@ -23,8 +23,8 @@ class IK:
         # MuJoCo model
         self.model = model
         if free_joint_names is not None:
-            self.free_qpos_ids, self.free_dof_ids = (
-                joint_names_to_qpos_dof_ids(model, free_joint_names)
+            self.free_qpos_ids, self.free_dof_ids = joints_to_qpos_dof_ids(
+                model, joint_names=free_joint_names
             )
         else:
             self.free_qpos_ids = np.arange(model.nq)
@@ -56,7 +56,7 @@ class IK:
         freeze_dof = np.setdiff1d(np.arange(model.nv), self.free_dof_ids)
         if len(freeze_dof) > 0:
             self.freeze_task = mink.DofFreezingTask(model, freeze_dof)
-            self.tasks.append(self.freeze_task)
+            self.constraints = [self.freeze_task]
 
         # Joint limits
         joint_limit = mink.ConfigurationLimit(model=self.model)
@@ -89,13 +89,15 @@ class IK:
         """Solve IK for target point [x y z qw qx qy qz]"""
         # Set current configuration
         if current is None:
+            current = self.default_q.copy()
             if random_current:
-                # TODO
-                current
-            else:
-                current = self.default_q.copy()
+                current[self.free_qpos_ids] = sample_qpos(
+                    self.model, self.free_qpos_ids
+                )
+
         self.configuration.update(q=current)
         self.posture_task.set_target(current)
+        self.freeze_task.set_target(current[self.freeze_dof_ids])
 
         # Set target
         rot = target[3:]
@@ -114,9 +116,10 @@ class IK:
             qdot = mink.solve_ik(
                 configuration=self.configuration,
                 tasks=self.tasks,
+                constraints=self.constraints,
+                limits=self.limits_col if use_col else self.limits,
                 dt=iter_dt,
                 solver=self.solver,
-                limits=self.limits_col if use_col else self.limits,
             )
             # Integrate to new configuration
             self.configuration.integrate_inplace(qdot, iter_dt)

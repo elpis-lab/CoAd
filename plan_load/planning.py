@@ -1,3 +1,6 @@
+import os, sys
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import time
 import numpy as np
 
@@ -135,3 +138,8 @@ class OMPLPlanner:
         # Check for collisions
         in_contact = geoms_in_contact(self.model, self.data, self.robot_geoms)
         return not in_contact
+
+
+if __name__ == "__main__":
+    # Write a test case for the planner
+    pass

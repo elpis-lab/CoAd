@@ -7,7 +7,8 @@ import mujoco
 import mujoco.viewer
 
 from plan_load.mujoco_utils import joint_names_to_joint_ids
-from plan_load.mujoco_utils import joint_names_to_qpos_dof_ids
+from plan_load.mujoco_utils import joints_to_qpos_dof_ids
+from plan_load.mujoco_utils import joints_to_limits
 
 
 class MujocoRobot:
@@ -34,8 +35,8 @@ class MujocoRobot:
 
         # Resolve joint ids and corresponding qpos ids
         self.joint_ids = joint_names_to_joint_ids(model, self.joint_names)
-        self.joint_qpos_ids, self.joint_dof_ids = joint_names_to_qpos_dof_ids(
-            model, self.joint_names
+        self.joint_qpos_ids, self.joint_dof_ids = joints_to_qpos_dof_ids(
+            model, joint_names=self.joint_names
         )
         self.n_joints = len(self.joint_ids)
 
@@ -44,7 +45,7 @@ class MujocoRobot:
             self.ee_names = ee_names
 
         # get joint limits
-        self.joint_limits = self.get_joint_limits()
+        self.joint_limits = joints_to_limits(model, self.joint_ids)
         # get robot geoms from subtree
         self.robot_geoms = self.get_robot_geoms(collision_geom_group)
 
@@ -67,16 +68,6 @@ class MujocoRobot:
         data.qpos[self.joint_qpos_ids] = q
 
         mujoco.mj_forward(self.model, data)
-
-    def get_joint_limits(self):
-        """Get joint limits"""
-        lo = np.full(self.n_joints, -np.inf)
-        hi = np.full(self.n_joints, np.inf)
-        for i, jid in enumerate(self.joint_ids):
-            if self.model.jnt_limited[jid]:
-                lo[i] = self.model.jnt_range[jid][0]
-                hi[i] = self.model.jnt_range[jid][1]
-        return lo, hi
 
     def get_robot_geoms(self, geom_group=None):
         """Get robot geoms"""

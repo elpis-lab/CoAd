@@ -1,10 +1,34 @@
 import mujoco
 import numpy as np
 
-from plan_load.mink_ik import IK
+
+########## Joint Operations ##########
+def sample_qpos(
+    model: mujoco.MjModel,
+    joint_ids: list[int] | None = None,
+    joint_names: list[str] | None = None,
+    mean: np.ndarray | None = None,
+    sigma: np.ndarray | float = 0.4,
+):
+    """Sample a qpos within the limits of the given joint ids or names"""
+    if joint_ids is None and joint_names is not None:
+        joint_ids = joint_names_to_joint_ids(model, joint_names)
+    if joint_ids is None and joint_names is None:
+        raise ValueError("Either joint_ids or joint_names must be provided")
+    lo, hi = joints_to_limits(model, joint_ids)
+
+    # Sample completely randomly
+    if mean is None:
+        return np.random.uniform(low=lo, high=hi)
+
+    # Sample around mean
+    if isinstance(sigma, float):
+        sigma = np.full(len(joint_ids), sigma)
+    q = mean + sigma * np.random.randn(len(joint_ids))
+    q = np.clip(q, lo, hi)
+    return q
 
 
-########## Joint Indexing ##########
 def joint_type_to_size(joint_type: mujoco.mjtJoint) -> tuple[int, int]:
     """Return the size of the given joint type"""
     if joint_type == mujoco.mjtJoint.mjJNT_HINGE:
@@ -31,21 +55,45 @@ def joint_names_to_joint_ids(
     return np.array(ids, dtype=int)
 
 
-def joint_names_to_qpos_dof_ids(
-    model: mujoco.MjModel, joint_names: list[str]
-) -> np.ndarray:
-    """Return flat array of qpos ids for the given joint names ."""
+def joints_to_qpos_dof_ids(
+    model: mujoco.MjModel,
+    joint_ids: list[int] | None = None,
+    joint_names: list[str] | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return tuple of (qpos_ids, dof_ids) for the given joint ids or names"""
+    if joint_ids is None and joint_names is not None:
+        joint_ids = joint_names_to_joint_ids(model, joint_names)
+    if joint_ids is None and joint_names is None:
+        raise ValueError("Either joint_ids or joint_names must be provided")
+
     qpos_ids = []
     dof_ids = []
-    for name in joint_names:
-        j_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
-        if j_id < 0:
-            raise ValueError(f"Joint '{name}' not found in model")
+    for j_id in joint_ids:
         adr = int(model.jnt_qposadr[j_id])
         qpos_size, dof_size = joint_type_to_size(model.jnt_type[j_id])
         qpos_ids.extend(range(adr, adr + qpos_size))
         dof_ids.extend(range(adr, adr + dof_size))
     return np.array(qpos_ids, dtype=int), np.array(dof_ids, dtype=int)
+
+
+def joints_to_limits(
+    model: mujoco.MjModel,
+    joint_ids: list[int] | None = None,
+    joint_names: list[str] | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return the limits of the given joint ids or names"""
+    if joint_ids is None and joint_names is not None:
+        joint_ids = joint_names_to_joint_ids(model, joint_names)
+    if joint_ids is None and joint_names is None:
+        raise ValueError("Either joint_ids or joint_names must be provided")
+
+    lo = np.full(len(joint_ids), -np.inf)
+    hi = np.full(len(joint_ids), np.inf)
+    for i, j_id in enumerate(joint_ids):
+        if model.jnt_limited[j_id]:
+            lo[i] = model.jnt_range[j_id][0]
+            hi[i] = model.jnt_range[j_id][1]
+    return lo, hi
 
 
 ########## IK ##########
