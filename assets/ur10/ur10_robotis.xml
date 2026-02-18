@@ -209,4 +209,12 @@
     <general class="gripper_actuator" name="gripper" tendon="gripper_split" 
              forcerange="-50 50" ctrlrange="0 1" gainprm="560 0 0" biasprm="0 -500 -50"/>
   </actuator>
+
+  <contact>
+    <exclude body1="rh_p12_rn_l1" body2="rh_p12_rn_r1"/>
+    <exclude body1="rh_p12_rn_l2" body2="rh_p12_rn_r2"/>
+    <exclude body1="rh_p12_rn_base" body2="rh_p12_rn_l2"/>
+    <exclude body1="rh_p12_rn_base" body2="rh_p12_rn_r2"/>
+  </contact>
+
 </mujoco>
