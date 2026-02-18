@@ -1,9 +1,13 @@
+import os, sys
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import time
 import numpy as np
 import mujoco
 import mink
 
-from mujoco_utils import joints_to_qpos_dof_ids, sample_qpos
+from plan_load.mujoco_utils import sample_qpos
+from plan_load.robot import MujocoRobot, Panda, UR10, FetchArm
 
 
 class IK:
@@ -11,39 +15,28 @@ class IK:
 
     def __init__(
         self,
-        model: mujoco.MjModel,
-        ee_site: str = "attachment_site",
-        default_q: np.ndarray | None = None,
-        free_joint_names: list[str] | None = None,
+        robot: MujocoRobot,
         solver: str = "daqp",
         collision_pairs: list[tuple[list[str], list[str]]] = (),
         max_velocities: dict[str, float] | None = None,
     ):
         """Initialize meta IK class"""
         # MuJoCo model
-        self.model = model
-        if free_joint_names is not None:
-            self.free_qpos_ids, self.free_dof_ids = joints_to_qpos_dof_ids(
-                model, joint_names=free_joint_names
-            )
-        else:
-            self.free_qpos_ids = np.arange(model.nq)
-            self.free_dof_ids = np.arange(model.nv)
+        self.robot = robot
+        self.model = robot.model
+        self.free_qpos_ids = robot.joint_qpos_ids
+        self.free_dof_ids = robot.joint_dof_ids
 
         # Mink
-        self.configuration = mink.Configuration(self.model)
-        if default_q is not None:
-            self.configuration.update(q=default_q)
+        self.configuration = mink.Configuration(self.model, robot.data.qpos[:])
         self.default_q = self.configuration.q.copy()
-        self.data = self.configuration.data
         # solver
         self.solver = solver
 
         # Tasks
         # reach target
-        self.ee_site = ee_site
         self.ee_task = mink.FrameTask(
-            frame_name=self.ee_site,
+            frame_name=robot.ee_name,
             frame_type="site",
             position_cost=1.0,
             orientation_cost=0.5,
@@ -52,22 +45,29 @@ class IK:
         # keep posture
         self.posture_task = mink.PostureTask(self.model, cost=1e-3)
         self.tasks = [self.ee_task, self.posture_task]
+
+        # Constraints
         # freeze dof
-        freeze_dof = np.setdiff1d(np.arange(model.nv), self.free_dof_ids)
+        freeze_dof = list(
+            np.setdiff1d(range(self.model.nv), self.free_dof_ids)
+        )
         if len(freeze_dof) > 0:
-            self.freeze_task = mink.DofFreezingTask(model, freeze_dof)
+            self.freeze_task = mink.DofFreezingTask(self.model, freeze_dof)
             self.constraints = [self.freeze_task]
 
-        # Joint limits
-        joint_limit = mink.ConfigurationLimit(model=self.model)
-        self.limits = [joint_limit]
-
-        # Velocity limit
+        # Limits
+        # joint limits
+        self.joint_limit = mink.ConfigurationLimit(
+            self.model, min_distance_from_limits=1e-6
+        )
+        self.limits = [self.joint_limit]
+        # velocity limit
         if max_velocities is not None:
-            velocity_limit = mink.VelocityLimit(self.model, max_velocities)
-            self.limits.append(velocity_limit)
-
-        # Collision avoidance
+            self.velocity_limit = mink.VelocityLimit(
+                self.model, max_velocities
+            )
+            self.limits.append(self.velocity_limit)
+        # collision avoidance
         self.limits_col = list(self.limits)
         if collision_pairs:
             collision = mink.CollisionAvoidanceLimit(
@@ -80,24 +80,42 @@ class IK:
         target: np.ndarray,
         current: np.ndarray | None = None,
         random_current: bool = False,
-        use_col: bool = True,
+        random_sigma: float = 0.4,
+        use_col: bool = False,
         iter_dt: float = 0.01,
         max_iters: int = 200,
         pos_tol: float = 1e-3,
         rot_tol: float = 1e-2,
     ):
         """Solve IK for target point [x y z qw qx qy qz]"""
-        # Set current configuration
-        if current is None:
-            current = self.default_q.copy()
-            if random_current:
-                current[self.free_qpos_ids] = sample_qpos(
-                    self.model, self.free_qpos_ids
+        # Get a full size configuration to start with
+        # Check reference configuration size
+        config = self.default_q.copy()
+        if current is not None:
+            if len(current) == self.model.nq:
+                config[:] = current
+            elif len(current) == self.robot.n_joints:
+                config[self.free_qpos_ids] = current
+            else:
+                raise ValueError(
+                    f"Invalid current q length: {len(current)}. "
+                    + f"Expected {self.model.nq} or {self.robot.n_joints}"
                 )
 
-        self.configuration.update(q=current)
-        self.posture_task.set_target(current)
-        self.freeze_task.set_target(current[self.freeze_dof_ids])
+        # Get random joint values for free joints
+        if random_current:
+            if current is not None:
+                if len(current) == self.model.nq:
+                    current = current[self.free_qpos_ids]
+            # if current is None, sample randomly
+            # if current is provided, sample around it
+            config[self.free_qpos_ids] = sample_qpos(
+                self.model, self.free_qpos_ids, None, current, random_sigma
+            )
+
+        # Set configuration
+        self.configuration.update(q=config)
+        self.posture_task.set_target(config)
 
         # Set target
         rot = target[3:]
@@ -113,16 +131,28 @@ class IK:
         best_err = np.inf
         for i in range(max_iters):
             # Run one IK step (joint velocities)
-            qdot = mink.solve_ik(
-                configuration=self.configuration,
-                tasks=self.tasks,
-                constraints=self.constraints,
-                limits=self.limits_col if use_col else self.limits,
-                dt=iter_dt,
-                solver=self.solver,
-            )
+            try:
+                qdot = mink.solve_ik(
+                    configuration=self.configuration,
+                    tasks=self.tasks,
+                    constraints=self.constraints,
+                    limits=self.limits_col if use_col else self.limits,
+                    dt=iter_dt,
+                    solver=self.solver,
+                )
+            except Exception as e:
+                return False, best_q
+
             # Integrate to new configuration
             self.configuration.integrate_inplace(qdot, iter_dt)
+            # clip to joint limits
+            q = self.configuration.q.copy()
+            q[self.free_qpos_ids] = np.clip(
+                q[self.free_qpos_ids],
+                self.joint_limit.lower[self.free_qpos_ids],
+                self.joint_limit.upper[self.free_qpos_ids],
+            )
+            self.configuration.update(q=q)
 
             # Check convergence
             err = self.ee_task.compute_error(self.configuration)
@@ -137,15 +167,17 @@ class IK:
                 best_err = pos_err + rot_err
                 best_q = self.configuration.q.copy()
 
-        return reached, best_q
+        return reached, best_q[self.free_qpos_ids]
 
 
 class PandaIK(IK):
     """Panda IK class"""
 
-    # Collision geoms
-    HAND = ["hand_c", "left_finger_c", "right_finger_c"]
-    PADS = [
+    # Collision geoms for IK
+    GRIPPER = [
+        "hand_c",
+        "left_finger_c",
+        "right_finger_c",
         "left_pad_c1",
         "left_pad_c2",
         "left_pad_c3",
@@ -169,90 +201,23 @@ class PandaIK(IK):
         "link6_c",
         "link7_c",
     ]
-    FREE_JOINTS = [
-        "joint1",
-        "joint2",
-        "joint3",
-        "joint4",
-        "joint5",
-        "joint6",
-        "joint7",
-    ]
 
     def __init__(
         self,
-        model: mujoco.MjModel,
-        ee_site: str = "attachment_site",
-        default_q: np.ndarray | None = None,
-        free_joint_names: list[str] | None = None,
+        robot: Panda,
         solver: str = "daqp",
-        collision_pairs: list[tuple[list[str], list[str]]] = None,
-        max_velocities: dict[str, float] | None = None,
         env_collision_geoms: list[str] = None,
     ):
         """Initialize Panda IK class"""
-        # Make sure the finger joints are open
-        if default_q is not None:
-            if len(default_q) == 7:
-                default_q = np.concatenate([default_q, np.array([0.04, 0.04])])
-            elif len(default_q) == 9:
-                default_q = default_q.copy()
-                default_q[7:9] = [0.04, 0.04]
-
-        if free_joint_names is None:
-            free_joint_names = self.FREE_JOINTS
-
-        # Self collision
-        if collision_pairs is None:
-            collision_pairs = [(self.HAND + self.PADS, self.ARM)]
-            if env_collision_geoms is not None:
-                collision_pairs.append(
-                    (self.HAND + self.PADS, env_collision_geoms)
-                )
-
-        if max_velocities is None:
-            max_velocities = {name: np.pi for name in self.FREE_JOINTS}
-
-        super().__init__(
-            model,
-            ee_site,
-            default_q,
-            free_joint_names,
-            solver,
-            collision_pairs,
-            max_velocities,
-        )
-
-    def solve(
-        self,
-        target: np.ndarray,
-        current: np.ndarray | None = None,
-        random_current: bool = False,
-        use_col: bool = True,
-        iter_dt: float = 0.01,
-        max_iters: int = 200,
-        pos_tol: float = 1e-3,
-        rot_tol: float = 1e-2,
-    ):
-        """Override solve method to use 7-DOF input and output"""
-        # Expand to full DOF
-        ref = current
-        if current is not None:
-            ref = self.default_q.copy()
-            ref[self.free_qpos_ids] = current
-
-        reached, solution = super().solve(
-            target,
-            ref,
-            random_current,
-            use_col,
-            iter_dt,
-            max_iters,
-            pos_tol,
-            rot_tol,
-        )
-        # Crop to free joints' qpos
-        return reached, solution[self.free_qpos_ids]
+        # Collision constraints
+        # self collision
+        collision_pairs = [(self.GRIPPER, self.ARM)]
+        # environment collision
+        if env_collision_geoms is not None:
+            collision_pairs.append((self.GRIPPER, env_collision_geoms))
+        # Velocity limits
+        max_velocities = {name: np.pi for name in robot.joint_names}
+        super().__init__(robot, solver, collision_pairs, max_velocities)
 
 
 class UR10IK(IK):
@@ -275,91 +240,33 @@ class UR10IK(IK):
         "wrist_2_collision_0",
         "wrist_2_collision_1",
     ]
-    FREE_JOINTS = [
-        "shoulder_pan_joint",
-        "shoulder_lift_joint",
-        "elbow_joint",
-        "wrist_1_joint",
-        "wrist_2_joint",
-        "wrist_3_joint",
-    ]
 
     def __init__(
         self,
-        model: mujoco.MjModel,
-        ee_site: str = "attachment_site",
-        default_q: np.ndarray | None = None,
-        free_joint_names: list[str] | None = None,
+        robot: UR10,
         solver: str = "daqp",
-        collision_pairs: list[tuple[list[str], list[str]]] = None,
-        max_velocities: dict[str, float] | None = None,
         env_collision_geoms: list[str] = None,
     ):
-        """Initialize Panda IK class"""
-        # Make sure the finger joints are open
-        if default_q is not None:
-            if len(default_q) == 6:
-                default_q = np.concatenate([default_q, 1.12 * np.ones(4)])
-            elif len(default_q) == 10:
-                default_q = default_q.copy()
-                default_q[6:10] = 1.12 * np.ones(4)
+        """Initialize UR10 IK class"""
+        # Collision constraints
+        # self collision
+        collision_pairs = [(self.GRIPPER, self.ARM)]
+        # environment collision
+        if env_collision_geoms is not None:
+            collision_pairs.append((self.GRIPPER, env_collision_geoms))
+        # Velocity limits
+        max_velocities = {name: np.pi for name in robot.joint_names}
+        super().__init__(robot, solver, collision_pairs, max_velocities)
 
-        if free_joint_names is None:
-            free_joint_names = self.FREE_JOINTS
 
-        # Self collision
-        if collision_pairs is None:
-            collision_pairs = [(self.GRIPPER, self.ARM)]
-            if env_collision_geoms is not None:
-                collision_pairs.append((self.GRIPPER, env_collision_geoms))
+# TODO
+class FetchArmIK(IK):
+    """Fetch (arm only) IK class"""
 
-        if max_velocities is None:
-            max_velocities = {
-                "shoulder_pan_joint": np.pi,
-                "shoulder_lift_joint": np.pi,
-                "elbow_joint": np.pi,
-                "wrist_1_joint": np.pi,
-                "wrist_2_joint": np.pi,
-                "wrist_3_joint": np.pi,
-            }
+    pass
 
-        super().__init__(
-            model,
-            ee_site,
-            default_q,
-            free_joint_names,
-            solver,
-            collision_pairs,
-            max_velocities,
-        )
 
-    def solve(
-        self,
-        target: np.ndarray,
-        current: np.ndarray | None = None,
-        random_current: bool = False,
-        use_col: bool = True,
-        iter_dt: float = 0.01,
-        max_iters: int = 200,
-        pos_tol: float = 1e-3,
-        rot_tol: float = 1e-2,
-    ):
-        """Override solve method to use 6-DOF input and output"""
-        # Expand to full DOF
-        ref = current
-        if current is not None:
-            ref = self.default_q.copy()
-            ref[self.free_qpos_ids] = current
-
-        reached, solution = super().solve(
-            target,
-            ref,
-            random_current,
-            use_col,
-            iter_dt,
-            max_iters,
-            pos_tol,
-            rot_tol,
-        )
-        # Crop to free joints' qpos
-        return reached, solution[self.free_qpos_ids]
+# TODO
+# Write some test cases for the IK classes
+if __name__ == "__main__":
+    pass

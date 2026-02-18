@@ -9,7 +9,6 @@ import ompl.geometric as og
 import ompl.util as ou
 
 import mujoco
-from plan_load.mujoco_utils import geoms_in_contact
 from plan_load.robot import MujocoRobot
 
 
@@ -35,12 +34,13 @@ class OMPLPlanner:
             self.data = data
 
         self.robot_geoms = self.robot.robot_geoms
-        self.n_dof = self.robot.n_dof
+        self.n_dof = self.robot.n_joints
         self.joint_limits = self.robot.joint_limits
 
         # Set up OMPL planner
-        self.planner = planner
+        self.planner_name = planner
         self.ss, self.si = self.set_up_ompl()
+        self.planner = self.ss.getPlanner()
         if not log:
             ou.setLogLevel(ou.LOG_ERROR)
 
@@ -69,7 +69,7 @@ class OMPLPlanner:
         ss.setOptimizationObjective(ob.PathLengthOptimizationObjective(si))
 
         # Setting up OMPL planner
-        ss.setPlanner(getattr(og, self.planner)(si))
+        ss.setPlanner(getattr(og, self.planner_name)(si))
         return ss, si
 
     def plan(
@@ -110,7 +110,7 @@ class OMPLPlanner:
             # interpolate path
             if num_waypoints is not None:
                 path.interpolate(int(num_waypoints))
-
+            # extract waypoints
             states = path.getStates()
             waypoints = [
                 np.array([s[i] for i in range(self.n_dof)], dtype=float)
@@ -120,6 +120,7 @@ class OMPLPlanner:
             if log:
                 print("Path planning failed.")
 
+        self.ss.clear()
         if benchmark:
             t1 = time.perf_counter()
             # total time: plan + simplify + interpolation
@@ -129,17 +130,115 @@ class OMPLPlanner:
             return waypoints, total_time, planning_time
         return waypoints
 
+    def construct_roadmap(self, start, timeout=30.0):
+        """
+        Sample uniformly in the state space and build a roadmap.
+        The roadmap is kept for subsequent planning calls.
+        """
+        assert (
+            "PRM" in self.planner_name
+        ), f"Planner {self.planner_name} is not supported."
+
+        # Set start and a dummy goal (same as start)
+        # so ProblemDefinition is valid.
+        start_state = ob.State(self.si.getStateSpace())
+        for i in range(self.n_dof):
+            start_state[i] = float(start[i])
+        self.ss.setStartAndGoalStates(start_state, start_state)
+
+        # Start growing the roadmap
+        self.ss.setup()
+        ter = ob.timedPlannerTerminationCondition(float(timeout))
+        self.planner.constructRoadmap(ter)
+
+    def query(
+        self,
+        start,
+        goal,
+        timeout=10.0,
+        smooth_path=True,
+        num_waypoints=200,
+        benchmark=False,
+        check_time_freq=1e-3,
+    ):
+        """
+        Solve a start-goal query using the pre-built roadmap from
+        sample_for_batch_planning. Reuses the roadmap; call clearQuery
+        between queries to clear only the previous start/goal.
+        """
+        assert (
+            "PRM" in self.planner_name
+        ), f"Planner {self.planner_name} is not supported."
+
+        # Clear previous query (start/goal) but keep the roadmap
+        self.planner.clearQuery()
+
+        # Set new start and goal
+        start_state = ob.State(self.si.getStateSpace())
+        goal_state = ob.State(self.si.getStateSpace())
+        for i in range(self.n_dof):
+            start_state[i] = float(start[i])
+            goal_state[i] = float(goal[i])
+        self.ss.setStartAndGoalStates(start_state, goal_state)
+
+        # TODO
+        # need customized OMPL implementation here
+        t0 = time.perf_counter()
+        waypoints = []
+        timeout_c = time.perf_counter()
+        status_str = ""
+        while status_str != "Exact solution":
+            status = self.ss.solve(check_time_freq)
+            status_str = status.asString()
+            if time.perf_counter() - timeout_c > float(timeout):
+                break
+
+        # Check collision since environment is changed
+        valid_path = False
+        if status.asString() == "Exact solution":
+            valid_path = True
+            path = self.ss.getSolutionPath()
+            for state in path.getStates():
+                if not self.validity_checker(state):
+                    valid_path = False
+                    break
+
+        if status.asString() == "Exact solution" and valid_path:
+            path = self.ss.getSolutionPath()
+            if smooth_path:
+                ps = og.PathSimplifier(self.si)
+                try:
+                    ps.ropeShortcutPath(path)
+                except Exception:
+                    ps.shortcutPath(path)
+                ps.smoothBSpline(path)
+            if num_waypoints is not None:
+                path.interpolate(int(num_waypoints))
+            states = path.getStates()
+            waypoints = [
+                np.array([s[i] for i in range(self.n_dof)], dtype=float)
+                for s in states
+            ]
+
+        if benchmark:
+            t1 = time.perf_counter()
+            total_time = round(t1 - t0, 5)
+            planning_time = self.ss.getLastPlanComputationTime()
+            return waypoints, total_time, planning_time
+        return waypoints
+
     def validity_checker(self, state):
         """Check if the state is valid"""
         # set robot joint positions
-        q = np.array([state[i] for i in range(self.robot.n_dof)], dtype=float)
+        q = np.array([state[i] for i in range(self.n_dof)], dtype=float)
         self.robot.set_joint_qpos(q, self.data)
 
         # Check for collisions
-        in_contact = geoms_in_contact(self.model, self.data, self.robot_geoms)
+        in_contact = self.robot.in_contact()
         return not in_contact
 
 
+# TODO
+# Write a test case for the planner
 if __name__ == "__main__":
-    # Write a test case for the planner
     pass

@@ -17,6 +17,17 @@ def sample_qpos(
         raise ValueError("Either joint_ids or joint_names must be provided")
     lo, hi = joints_to_limits(model, joint_ids)
 
+    # This function only works with regular hinge joints and slide joints
+    for j_id in joint_ids:
+        if model.jnt_type[j_id] not in [
+            mujoco.mjtJoint.mjJNT_HINGE,
+            mujoco.mjtJoint.mjJNT_SLIDE,
+        ]:
+            raise ValueError(
+                f"Joint {j_id} is not a regular hinge or slide joint"
+                + f"Sample qpos is not supported for {model.jnt_type[j_id]}"
+            )
+
     # Sample completely randomly
     if mean is None:
         return np.random.uniform(low=lo, high=hi)
@@ -29,7 +40,7 @@ def sample_qpos(
     return q
 
 
-def joint_type_to_size(joint_type: mujoco.mjtJoint) -> tuple[int, int]:
+def joint_type_sizes(joint_type: mujoco.mjtJoint) -> tuple[int, int]:
     """Return the size of the given joint type"""
     if joint_type == mujoco.mjtJoint.mjJNT_HINGE:
         return 1, 1
@@ -70,7 +81,7 @@ def joints_to_qpos_dof_ids(
     dof_ids = []
     for j_id in joint_ids:
         adr = int(model.jnt_qposadr[j_id])
-        qpos_size, dof_size = joint_type_to_size(model.jnt_type[j_id])
+        qpos_size, dof_size = joint_type_sizes(model.jnt_type[j_id])
         qpos_ids.extend(range(adr, adr + qpos_size))
         dof_ids.extend(range(adr, adr + dof_size))
     return np.array(qpos_ids, dtype=int), np.array(dof_ids, dtype=int)
@@ -96,22 +107,51 @@ def joints_to_limits(
     return lo, hi
 
 
-########## IK ##########
-
-
 ########## Collision Checking ##########
+def get_geoms_from_group(
+    model: mujoco.MjModel, group_id: int, root_link: str | None = None
+) -> set[int]:
+    """Get the geoms from the given group id"""
+    # Mark bodies in subtree to check
+    if root_link is None:
+        in_subtree = [True] * model.nbody
+    else:
+        # Get the root body id
+        root_body_id = mujoco.mj_name2id(
+            model, mujoco.mjtObj.mjOBJ_BODY, root_link
+        )
+        if root_body_id < 0:
+            raise ValueError(f"Root body '{root_link}' not found")
+
+        # Mark bodies in root subtree
+        in_subtree = [False] * model.nbody
+        in_subtree[root_body_id] = True
+        for b in range(model.nbody):
+            p = model.body_parentid[b]
+            if p >= 0 and in_subtree[p]:
+                in_subtree[b] = True
+
+    # Get geoms that are in the subtree and are in given group
+    geoms = set()
+    for g in range(model.ngeom):
+        if in_subtree[model.geom_bodyid[g]]:
+            if model.geom_group[g] == group_id:
+                geoms.add(g)
+    return geoms
+
+
 def geoms_in_contact(
     model: mujoco.MjModel,
     data: mujoco.MjData,
     geoms_ids: set[int],
-    print_contact: bool = False,
+    verbose: bool = False,
 ) -> bool:
     """Check if the given geoms is in contact with others"""
     for i in range(data.ncon):
         c = data.contact[i]
 
         if c.geom1 in geoms_ids or c.geom2 in geoms_ids:
-            if print_contact:
+            if verbose:
                 g1 = mujoco.mj_id2name(
                     model, mujoco.mjtObj.mjOBJ_GEOM, c.geom1
                 )

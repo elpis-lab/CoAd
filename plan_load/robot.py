@@ -7,8 +7,8 @@ import mujoco
 import mujoco.viewer
 
 from plan_load.mujoco_utils import joint_names_to_joint_ids
-from plan_load.mujoco_utils import joints_to_qpos_dof_ids
-from plan_load.mujoco_utils import joints_to_limits
+from plan_load.mujoco_utils import joints_to_limits, joints_to_qpos_dof_ids
+from plan_load.mujoco_utils import get_geoms_from_group, geoms_in_contact
 
 
 class MujocoRobot:
@@ -18,16 +18,20 @@ class MujocoRobot:
         self,
         model,
         joint_names,
-        root_root,
+        root_link,
+        data=None,
         collision_geom_group=3,
-        ee_names=None,
+        ee_name=None,
         visualize=False,
     ):
         """Initialize MujocoRobot"""
         self.model = model
-        self.data = mujoco.MjData(model)
+        if data is None:
+            self.data = mujoco.MjData(model)
+        else:
+            self.data = data
         self.joint_names = joint_names
-        self.root_root = root_root
+        self.root_link = root_link
         self.viewer = None
         if visualize:
             self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
@@ -39,63 +43,65 @@ class MujocoRobot:
             model, joint_names=self.joint_names
         )
         self.n_joints = len(self.joint_ids)
-
-        self.ee_body_names = []
-        if ee_names is not None:
-            self.ee_names = ee_names
-
         # get joint limits
         self.joint_limits = joints_to_limits(model, self.joint_ids)
+
         # get robot geoms from subtree
         self.robot_geoms = self.get_robot_geoms(collision_geom_group)
 
-    def get_joint_qpos(self, data=None):
+        self.ee_name = ee_name
+
+    def get_joint_qpos(self):
         """Get joint angles"""
         # allow passing in a different data object
-        if data is None:
-            data = self.data
-        return data.qpos[self.joint_qpos_ids].copy()
+        return self.data.qpos[self.joint_qpos_ids].copy()
 
-    def set_joint_qpos(self, q, data=None):
+    def set_joint_qpos(self, q):
         """Set joint angles"""
-        # allow passing in a different data object
-        if data is None:
-            data = self.data
         # set joint values
         q = np.asarray(q)
         if len(q) != self.n_joints:
             raise ValueError("Expected q length %d" % self.n_joints)
-        data.qpos[self.joint_qpos_ids] = q
+        self.data.qpos[self.joint_qpos_ids] = q
 
-        mujoco.mj_forward(self.model, data)
+        mujoco.mj_forward(self.model, self.data)
 
-    def get_robot_geoms(self, geom_group=None):
-        """Get robot geoms"""
-        root_body_id = mujoco.mj_name2id(
-            self.model, mujoco.mjtObj.mjOBJ_BODY, self.root_root
+    def get_ee_pose(self):
+        """Get end-effector pose"""
+        ee_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_SITE, self.ee_name
         )
-        if root_body_id < 0:
-            raise ValueError("Root body '%s' not found" % self.root_root)
+        pos = self.data.site_xpos[ee_id]
+        mat = self.data.site_xmat[ee_id]
+        quat = np.zeros(4, dtype=float)
+        mujoco.mju_mat2Quat(quat, mat)
+        return np.concatenate([pos.copy(), quat])
 
-        # Mark bodies in robot root subtree
-        in_robot = [False] * self.model.nbody
-        in_robot[root_body_id] = True
-        for b in range(self.model.nbody):
-            p = self.model.body_parentid[b]
-            if p >= 0 and in_robot[p]:
-                in_robot[b] = True
+    def in_contact(self, verbose=False):
+        """Check if the robot is in contact with the environment"""
+        return geoms_in_contact(
+            self.model, self.data, self.robot_geoms, verbose
+        )
 
-        # Get robot geoms that are in the subtree and are in given group
-        robot_geoms = set()
-        for g in range(self.model.ngeom):
-            if in_robot[self.model.geom_bodyid[g]]:
-                if (
-                    geom_group is None
-                    or self.model.geom_group[g] == geom_group
-                ):
-                    robot_geoms.add(g)
+    def get_robot_geoms(self, geom_group):
+        """Get robot geoms"""
+        return get_geoms_from_group(self.model, geom_group, self.root_link)
 
-        return robot_geoms
+    def teleport_base(self, pos=[0.0, 0.0, 0.0], quat=[1.0, 0.0, 0.0, 0.0]):
+        """Teleport the robot base to the given position and orientation"""
+        bid = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_BODY, self.root_link
+        )
+        if bid < 0:
+            raise ValueError(f"unknown body root: '{self.root_link}'")
+
+        self.model.body_pos[bid] = pos
+        self.model.body_quat[bid] = quat
+        mujoco.mj_forward(self.model, self.data)
+
+    def close(self):
+        if self.viewer is not None:
+            self.viewer.close()
 
 
 class Panda(MujocoRobot):
@@ -110,26 +116,27 @@ class Panda(MujocoRobot):
         "joint6",
         "joint7",
     ]
-    FINGERS = ["finger_joint1", "finger_joint2"]
-    FINGERS_CLOSED = [0.0, 0.0]
-    FINGERS_OPEN = [0.04, 0.04]
+    FINGER = ["finger_joint1", "finger_joint2"]
+    FINGER_OPEN = [0.04, 0.04]
+    FINGER_CLOSED = [0.0, 0.0]
 
-    def __init__(self, model, visualize=False):
+    def __init__(self, model, data=None, visualize=False):
         """Initialize PandaRobot"""
         MujocoRobot.__init__(
             self,
             model,
             joint_names=self.ARM,
-            root_root="link0",
+            root_link="link0",
+            data=data,
             collision_geom_group=3,
-            ee_names=["attachment_site"],
+            ee_name="attachment_site",
             visualize=visualize,
         )
 
-        # open the gripper
+        # Open the gripper
         for i, finger in enumerate(self.FINGERS):
             j_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, finger)
-            self.data.qpos[model.jnt_qposadr[j_id]] = self.FINGERS_OPEN[i]
+            self.data.qpos[model.jnt_qposadr[j_id]] = self.FINGER_OPEN[i]
         mujoco.mj_forward(model, self.data)
 
 
@@ -144,51 +151,59 @@ class UR10(MujocoRobot):
         "wrist_2_joint",
         "wrist_3_joint",
     ]
+    FINGER = ["rh_r1", "rh_l1", "rh_r2", "rh_l2"]
+    FINGER_OPEN = [0, 0, 0, 0]
+    FINGER_CLOSED = [1.12, 1.12, 1.12, 1.12]
 
-    def __init__(self, model, visualize=False):
+    def __init__(self, model, data=None, visualize=False):
         """Initialize UR10Robot"""
         MujocoRobot.__init__(
             self,
             model,
             joint_names=self.ARM,
-            root_root="base",
+            root_link="base",
+            data=data,
             collision_geom_group=3,
-            ee_names=["attachment_site"],
+            ee_name="attachment_site",
             visualize=visualize,
         )
 
 
+# TODO
+class FetchArm(MujocoRobot):
+    # Skip the base joints and head joints
+    pass
+
+
 if __name__ == "__main__":
-    # Test Robot
-    model = mujoco.MjModel.from_xml_path("assets/franka_emika_panda/scene.xml")
-    robot = Panda(model, visualize=True)
-    robot.set_joint_qpos(
-        np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785])
-    )
-
-    from plan_load.planning import geoms_in_contact
-
-    in_contact = geoms_in_contact(model, robot.data, robot.robot_geoms, True)
-    print(in_contact)
-    robot.viewer.sync()
-    input()
+    # # Test Panda
+    # model = mujoco.MjModel.from_xml_path("assets/franka_emika_panda/scene.xml")
+    # robot = Panda(model, visualize=True)
+    # robot.set_joint_qpos(
+    #     np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785])
+    # )
+    # robot.teleport_base(np.array([0.2, 0.0, 0.2]))
 
     # # Test UR10
-    # model = mujoco.MjModel.from_xml_path("assets/ur10/ur10_robotis.xml")
+    # model = mujoco.MjModel.from_xml_path("assets/ur10/scene.xml")
     # robot = UR10(model, visualize=True)
-    # robot.set_joint_qpos(np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+    # robot.set_joint_qpos(np.array([np.pi / 2, -1.7, 2, -1.87, -np.pi / 2, 0]))
 
-    while True:
-        time.sleep(0.01)
+    # TODO
+    # Test Fetch
+    model = mujoco.MjModel.from_xml_path("assets/fetch/scene.xml")
+    robot = FetchArm(model, visualize=True)
+    robot.set_joint_qpos(np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
 
-    # count = 0
-    # value = 1.0
-    # while True:
-    #     robot.viewer.sync()
-    #     if count % 300 == 0:
-    #         value = 0.0 if value == 1.0 else 1.0
-    #         count = 0
-    #     robot.data.ctrl[6] = value
-    #     mujoco.mj_step(robot.model, robot.data)
-    #     count += 1
-    #     time.sleep(0.01)
+    # test collision checking
+    in_contact = geoms_in_contact(model, robot.data, robot.robot_geoms, True)
+    print(robot.robot_geoms)
+    print("in_contact:", in_contact)
+    robot.viewer.sync()
+
+    # Keep the viewer
+    try:
+        while True:
+            time.sleep(0.01)
+    except KeyboardInterrupt:
+        robot.close()

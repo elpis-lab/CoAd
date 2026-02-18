@@ -1,0 +1,269 @@
+<mujoco model="fetch">
+  <compiler angle="radian" autolimits="true"/>
+
+  <option integrator="implicitfast"/>
+
+  <default>
+    <default class="fetch">
+      <material specular="0.5" shininess="0.25"/>
+      <joint armature="0.1" damping="1"/>
+      <general dyntype="none" biastype="affine" gainprm="1000" biasprm="0 -1000 -100"/>
+      <default class="gripper">
+        <joint type="slide" range="0 0.05"/>
+      </default>
+
+      <default class="visual">
+        <geom type="mesh" contype="0" conaffinity="0" group="2"/>
+      </default>
+      <default class="collision">
+        <geom type="mesh" group="3"/>
+      </default>
+    </default>
+  </default>
+
+  <asset>
+    <material name="mat_1" rgba="0.086 0.506 0.767 1"/>
+    <material name="mat_2" rgba="0.356 0.361 0.376 1"/>
+    <material name="mat_3" rgba="0 0 0 1"/>
+    <material name="mat_4" rgba="0.7922 0.8196 0.9333 1"/>
+    <material name="estop" rgba="0.764 0.002 0.004 1"/>
+    <texture name="base_link_texture" type="2d" file="meshes/visual/base_link_uv.png"/>
+    <texture name="elbow_flex_link_texture" type="2d" file="meshes/visual/elbow_flex_uv.png"/>
+    <texture name="forearm_roll_link_texture" type="2d" file="meshes/visual/forearm_roll_uv.png"/>
+    <texture name="gripper_texture" type="2d" file="meshes/visual/gripper_uv.png"/>
+    <texture name="head_pan_link_texture" type="2d" file="meshes/visual/head_pan_uv.png"/>
+    <texture name="head_tilt_link_texture" type="2d" file="meshes/visual/head_tilt_uv.png"/>
+    <texture name="shoulder_lift_link_texture" type="2d" file="meshes/visual/shoulder_lift_uv.png"/>
+    <texture name="shoulder_pan_link_texture" type="2d" file="meshes/visual/shoulder_pan_uv.png"/>
+    <texture name="torso_fixed_link_texture" type="2d" file="meshes/visual/torso_fixed_uv.png"/>
+    <texture name="torso_lift_link_texture" type="2d" file="meshes/visual/torso_lift_uv.png"/>
+    <texture name="upperarm_roll_link_texture" type="2d" file="meshes/visual/upperarm_roll_uv.png"/>
+    <texture name="wrist_flex_link_texture" type="2d" file="meshes/visual/wrist_flex_uv.png"/>
+    <texture name="wrist_roll_link_texture" type="2d" file="meshes/visual/wrist_roll_uv.png"/>
+    <material class="fetch" name="base_link_visual" texture="base_link_texture" />
+    <material class="fetch" name="elbow_flex_link_visual" texture="elbow_flex_link_texture" />
+    <material class="fetch" name="forearm_roll_link_visual" texture="forearm_roll_link_texture" />
+    <material class="fetch" name="gripper_visual" texture="gripper_texture" />
+    <material class="fetch" name="head_pan_link_visual" texture="head_pan_link_texture" />
+    <material class="fetch" name="head_tilt_link_visual" texture="head_tilt_link_texture" />
+    <material class="fetch" name="shoulder_lift_link_visual" texture="shoulder_lift_link_texture" />
+    <material class="fetch" name="shoulder_pan_link_visual" texture="shoulder_pan_link_texture" />
+    <material class="fetch" name="torso_fixed_link_visual" texture="torso_fixed_link_texture" />
+    <material class="fetch" name="torso_lift_link_visual" texture="torso_lift_link_texture" />
+    <material class="fetch" name="upperarm_roll_link_visual" texture="upperarm_roll_link_texture" />
+    <material class="fetch" name="wrist_flex_link_visual" texture="wrist_flex_link_texture" />
+    <material class="fetch" name="wrist_roll_link_visual" texture="wrist_roll_link_texture" />
+
+    <mesh name="base_link" file="meshes/visual/base_link.obj"/>
+    <mesh name="base_link_collision" file="meshes/collision/base_link_collision.STL"/>
+    <mesh name="r_wheel_link" file="meshes/visual/r_wheel_link.STL"/>
+    <mesh name="r_wheel_link_collision" file="meshes/collision/r_wheel_link_collision.STL"/>
+    <mesh name="l_wheel_link" file="meshes/visual/l_wheel_link.STL"/>
+    <mesh name="l_wheel_link_collision" file="meshes/collision/l_wheel_link_collision.STL"/>
+    <mesh name="torso_lift_link" file="meshes/visual/torso_lift_link.obj"/>
+    <mesh name="torso_lift_link_collision" file="meshes/collision/torso_lift_link_collision.STL"/>
+    <mesh name="head_pan_link" file="meshes/visual/head_pan_link.obj"/>
+    <mesh name="head_pan_link_collision" file="meshes/collision/head_pan_link_collision.STL"/>
+    <mesh name="head_tilt_link" file="meshes/visual/head_tilt_link.obj"/>
+    <mesh name="head_tilt_link_collision" file="meshes/collision/head_tilt_link_collision.STL"/>
+    <mesh name="shoulder_pan_link" file="meshes/visual/shoulder_pan_link.obj"/>
+    <mesh name="shoulder_pan_link_collision" file="meshes/collision/shoulder_pan_link_collision.STL"/>
+    <mesh name="shoulder_lift_link" file="meshes/visual/shoulder_lift_link.obj"/>
+    <mesh name="shoulder_lift_link_collision" file="meshes/collision/shoulder_lift_link_collision.STL"/>
+    <mesh name="upperarm_roll_link" file="meshes/visual/upperarm_roll_link.obj"/>
+    <mesh name="upperarm_roll_link_collision" file="meshes/collision/upperarm_roll_link_collision.STL"/>
+    <mesh name="elbow_flex_link" file="meshes/visual/elbow_flex_link.obj"/>
+    <mesh name="elbow_flex_link_collision" file="meshes/collision/elbow_flex_link_collision.STL"/>
+    <mesh name="forearm_roll_link" file="meshes/visual/forearm_roll_link.obj"/>
+    <mesh name="forearm_roll_link_collision" file="meshes/collision/forearm_roll_link_collision.STL"/>
+    <mesh name="wrist_flex_link" file="meshes/visual/wrist_flex_link.obj"/>
+    <mesh name="wrist_flex_link_collision" file="meshes/collision/wrist_flex_link_collision.STL"/>
+    <mesh name="wrist_roll_link" file="meshes/visual/wrist_roll_link.obj"/>
+    <mesh name="wrist_roll_link_collision" file="meshes/collision/wrist_roll_link_collision.STL"/>
+    <mesh name="gripper_link" file="meshes/visual/gripper_link.obj"/>
+    <mesh name="gripper_link_2" file="meshes/visual/gripper_link.STL"/>
+    <mesh name="r_gripper_finger_link" file="meshes/visual/r_gripper_finger_link.STL"/>
+    <mesh name="l_gripper_finger_link" file="meshes/visual/l_gripper_finger_link.STL"/>
+    <mesh name="bellows_link" file="meshes/visual/bellows_link.STL"/>
+    <mesh name="bellows_link_collision" file="meshes/collision/bellows_link_collision.STL"/>
+    <mesh name="estop_link" file="meshes/visual/estop_link.obj"/>
+    <mesh name="estop_link_2" file="meshes/visual/estop_link.STL"/>
+    <mesh name="laser_link" file="meshes/visual/laser_link.STL"/>
+    <mesh name="torso_fixed_link" file="meshes/visual/torso_fixed_link.obj"/>
+    <mesh name="torso_fixed_link_2" file="meshes/visual/torso_fixed_link.STL"/>
+  </asset>
+
+  <worldbody>
+    <light name="top" pos="0 0 2" mode="trackcom"/>
+    <body name="root" childclass="fetch">
+      <body name="root_arm_1_link_1">
+        <joint name="root_x_axis_joint" axis="1 0 0" type="slide" range="-50 50" damping="100"/>
+        <inertial mass="0.001" diaginertia="1e-6 1e-6 1e-6" pos="0 0 0"/>
+        <body name="root_arm_1_link_2">
+          <joint name="root_y_axis_joint" axis="0 1 0" type="slide" range="-50 50" damping="100"/>
+          <inertial mass="0.001" diaginertia="1e-6 1e-6 1e-6" pos="0 0 0"/>
+          <body name="base_link">
+            <joint name="root_z_rotation_joint" axis="0 0 1" type="hinge" limited="false" damping="100"/>
+
+            <inertial mass="70.1294" pos="-0.0036 0 0.0014" fullinertia="1.225 1.2853 0.987 0.0099 0.0062 -0.0034"/>
+            <geom type="mesh" mesh="base_link" class="visual" material="base_link_visual"/>
+            <geom type="mesh" mesh="base_link_collision" class="collision"/>
+            <body name="r_wheel_link" pos="0.0012914 -0.18738 0.055325">
+              <inertial mass="4.3542" pos="0 0 0" fullinertia="0.0045 0.005 0.0045 0 0 0"/>
+              <geom type="mesh" mesh="r_wheel_link" class="visual" material="mat_1"/>
+              <geom type="mesh" mesh="r_wheel_link_collision" class="collision"/>
+            </body>
+            <body name="l_wheel_link" pos="0.0012914 0.18738 0.055325">
+              <inertial mass="4.3542" pos="0 0 0" fullinertia="0.0045 0.005 0.0045 0 0 0"/>
+              <geom type="mesh" mesh="l_wheel_link" class="visual" material="mat_1"/>
+              <geom type="mesh" mesh="l_wheel_link_collision" class="collision"/>
+            </body>
+
+            <body name="torso_lift_link" pos="-0.086875 0 0.37743">
+              <joint name="torso_lift_joint" axis="0 0 1" type="slide" range="0 0.38615" damping="100"/>
+              <inertial mass="10.7796" pos="-0.0013 -0.0009 0.2935" fullinertia="0.3354 0.3354 0.0954 0 -0.0162 -0.0006"/>
+              <geom type="mesh" mesh="torso_lift_link" class="visual" material="torso_lift_link_visual"/>
+              <geom type="mesh" mesh="torso_lift_link_collision" class="collision"/>
+
+              <body name="head_pan_link" pos="0.053125 0 0.60300142">
+                <inertial mass="2.2556" pos="0.0321 0.0161 0.039" fullinertia="0.0129 0.0095 0.0184 0.0002 0.0007 -0"/>
+                <geom type="mesh" mesh="head_pan_link" class="visual" material="head_pan_link_visual"/>
+                <geom type="mesh" mesh="head_pan_link_collision" class="collision"/>
+                <body name="head_tilt_link" pos="0.14253 0 0.057999">
+                  <inertial mass="0.9087" pos="0.0081 0.0025 0.0113" fullinertia="0.0061 0.0014 0.0061 -0 0.0002 -0.0001"/>
+                  <geom type="mesh" mesh="head_tilt_link" class="visual" material="head_tilt_link_visual"/>
+                  <geom type="mesh" mesh="head_tilt_link_collision" class="collision"/>
+                  <body name="head_camera_link" pos="0.055 0 0.0225">
+                    <body name="head_camera_rgb_frame" pos="0 0.02 0">
+                      <body name="head_camera_rgb_optical_frame" quat="0.5 -0.5 0.5 -0.5"/>
+                    </body>
+                    <body name="head_camera_depth_frame" pos="0 0.045 0">
+                      <body name="head_camera_depth_optical_frame" quat="0.5 -0.5 0.5 -0.5"/>
+                    </body>
+                  </body>
+                  <joint name="head_tilt_joint" axis="0 1 0" type="hinge" range="-0.76 1.45"/>
+                </body>
+                <joint name="head_pan_joint" axis="0 0 1" type="hinge" range="-1.57 1.57"/>
+              </body>
+
+              <body name="shoulder_pan_link" pos="0.119525 0 0.34858">
+                <inertial mass="2.5587" pos="0.0927 -0.0056 0.0564" fullinertia="0.0043 0.0087 0.0087 -0.0001 0.001 -0.0001"/>
+                <geom type="mesh" mesh="shoulder_pan_link" class="visual" material="shoulder_pan_link_visual"/>
+                <geom type="mesh" mesh="shoulder_pan_link_collision" class="collision"/>
+                <body name="shoulder_lift_link" pos="0.117 0 0.06">
+                  <inertial mass="2.6615" pos="0.1432 0.0072 -0.0001" fullinertia="0.0028 0.0111 0.0112 -0.0021 -0 -0"/>
+                  <geom type="mesh" mesh="shoulder_lift_link" class="visual" material="shoulder_lift_link_visual"/>
+                  <geom type="mesh" mesh="shoulder_lift_link_collision" class="collision"/>
+                  <body name="upperarm_roll_link" pos="0.219 0 0">
+                    <inertial mass="2.3311" pos="0.1165 0.0014 0" fullinertia="0.0019 0.0045 0.0047 -0.0001 0 0"/>
+                    <geom type="mesh" mesh="upperarm_roll_link" class="visual" material="upperarm_roll_link_visual"/>
+                    <geom type="mesh" mesh="upperarm_roll_link_collision" class="collision"/>
+                    <body name="elbow_flex_link" pos="0.133 0 0">
+                      <inertial mass="2.1299" pos="0.1279 0.0073 0" fullinertia="0.0024 0.0082 0.0084 -0.0016 0 -0"/>
+                      <geom type="mesh" mesh="elbow_flex_link" class="visual" material="elbow_flex_link_visual"/>
+                      <geom type="mesh" mesh="elbow_flex_link_collision" class="collision"/>
+                      <body name="forearm_roll_link" pos="0.197 0 0">
+                        <inertial mass="1.6563" pos="0.1097 -0.0266 0" fullinertia="0.0016 0.003 0.0035 -0.0003 0 -0"/>
+                        <geom type="mesh" mesh="forearm_roll_link" class="visual" material="forearm_roll_link_visual"/>
+                        <geom type="mesh" mesh="forearm_roll_link_collision" class="collision"/>
+                        <body name="wrist_flex_link" pos="0.1245 0 0">
+                          <inertial mass="1.725" pos="0.0882 0.0009 -0.0001" fullinertia="0.0018 0.0042 0.0042 -0.0001 -0 0"/>
+                          <geom type="mesh" mesh="wrist_flex_link" class="visual" material="wrist_flex_link_visual"/>
+                          <geom type="mesh" mesh="wrist_flex_link_collision" class="collision"/>
+                          <body name="wrist_roll_link" pos="0.1385 0 0">
+                            <inertial mass="0.1354" pos="0.0095 0.0004 -0.0002" fullinertia="0.0001 0.0001 0.0001 0 0 0"/>
+                            <geom type="mesh" mesh="wrist_roll_link" class="visual" material="wrist_roll_link_visual"/>
+                            <geom type="mesh" mesh="wrist_roll_link_collision" class="collision"/>
+                            <body name="gripper_link" pos="0.16645 0 0">
+                              <inertial mass="1.5175" pos="-0.09 -0.0001 -0.0017" fullinertia="0.0013 0.0019 0.0024 -0 0 -0"/>
+                              <geom type="mesh" mesh="gripper_link" class="visual" material="gripper_visual"/>
+                              <geom type="mesh" mesh="gripper_link_2" class="collision"/>
+                              <body name="r_gripper_finger_link" pos="0 0.015425 0">
+                                <inertial mass="0.0798" pos="-0.01 0 0" fullinertia="0.002 0.002 0.002 0 0 0"/>
+                                <geom type="mesh" mesh="r_gripper_finger_link" class="visual" pos="0 0.101425 0" material="mat_2"/>
+                                <geom type="mesh" mesh="r_gripper_finger_link" class="collision" pos="0 0.101425 0"/>
+                                <joint name="r_gripper_finger_joint" axis="0 1 0" class="gripper"/>
+                              </body>
+                              <body name="l_gripper_finger_link" pos="0 -0.015425 0">
+                                <inertial mass="0.0798" pos="-0.01 0 0" fullinertia="0.002 0.002 0.002 0 0 0"/>
+                                <geom type="mesh" mesh="l_gripper_finger_link" class="visual" pos="0 -0.101425 0" material="mat_2"/>
+                                <geom type="mesh" mesh="l_gripper_finger_link" class="collision" pos="0 -0.101425 0"/>
+                                <joint name="l_gripper_finger_joint" axis="0 -1 0" class="gripper"/>
+                              </body>
+                            </body>
+                            <joint name="wrist_roll_joint" axis="1 0 0" type="hinge" limited="false" damping="5"/>
+                          </body>
+                          <joint name="wrist_flex_joint" axis="0 1 0" type="hinge" range="-2.16 2.16" damping="1"/>
+                        </body>
+                        <joint name="forearm_roll_joint" axis="1 0 0" type="hinge" limited="false" damping="5"/>
+                      </body>
+                      <joint name="elbow_flex_joint" axis="0 1 0" type="hinge" range="-2.251 2.251" damping="1"/>
+                    </body>
+                    <joint name="upperarm_roll_joint" axis="1 0 0" type="hinge" limited="false" damping="5"/>
+                  </body>
+                  <joint name="shoulder_lift_joint" axis="0 1 0" type="hinge" range="-1.221 1.518" damping="1"/>
+                </body>
+                <joint name="shoulder_pan_joint" axis="0 0 1" type="hinge" range="-1.6056 1.6056" damping="1"/>
+              </body>
+
+              <body name="bellows_link">
+                <inertial mass="0.16937404" pos="0.019132 -1.6721987e-16 -0.13486163" fullinertia="0.0033115913 0.0017444729 0.0016941757 -8.9230964e-18 -5.386222e-08 -8.0696498e-17"/>
+              </body>
+              <body name="bellows_link2">
+                <inertial mass="0.16937404" pos="0.019132 -1.6721987e-16 -0.13486163" fullinertia="0.0033115913 0.0017444729 0.0016941757 -8.9230964e-18 -5.386222e-08 -8.0696498e-17"/>
+                <geom type="mesh" mesh="bellows_link" class="visual" material="mat_3"/>
+                <geom type="mesh" mesh="bellows_link_collision" class="collision"/>
+              </body>
+            </body>
+
+            <body name="estop_link" pos="-0.12465 0.23892 0.31127" quat="0.70710548 0.70710808 0 0">
+              <inertial mass="0.0019613044" pos="0.0024345127 -0.0033060832 0.006651392" fullinertia="3.0281003e-07 2.9332292e-07 2.2851327e-07 -1.5862023e-08 3.165614e-08 -4.2883352e-08"/>
+              <geom type="mesh" mesh="estop_link" class="visual" material="estop"/>
+              <geom type="mesh" mesh="estop_link_2" class="collision"/>
+            </body>
+            <body name="laser_link" pos="0.235 0 0.2878" quat="-1.0341155e-13 1 0 -0">
+              <inertial mass="0.0083363457" pos="-0.030622897 0.00070916829 0.055197412" fullinertia="1.0186646e-06 5.1003959e-07 1.2827067e-06 -5.8844763e-08 7.8385724e-08 -7.1266429e-09"/>
+              <geom type="mesh" mesh="laser_link" class="visual" material="mat_4"/>
+              <geom type="mesh" mesh="laser_link" class="collision"/>
+            </body>
+            <body name="torso_fixed_link" pos="-0.086875 0 0.377425">
+              <inertial mass="13.2775" pos="-0.0722 0.0057 0.2656" fullinertia="0.3861 0.3388 0.1018 0.0015 -0.0102 0.0117"/>
+              <geom type="mesh" mesh="torso_fixed_link" class="visual" material="torso_fixed_link_visual"/>
+              <geom type="mesh" mesh="torso_fixed_link_2" class="collision"/>
+            </body>
+
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <tendon>
+    <fixed name="gripper">
+      <joint joint="r_gripper_finger_joint" coef="0.5"/>
+      <joint joint="l_gripper_finger_joint" coef="0.5"/>
+    </fixed>
+  </tendon>
+
+  <equality>
+    <joint joint1="r_gripper_finger_joint" joint2="l_gripper_finger_joint" solimp="0.95 0.99 0.001" solref="0.005 1"/>
+  </equality>
+
+  <actuator>
+    <general class="fetch" name="root_x_axis_joint" joint="root_x_axis_joint" ctrlrange="-20 20" forcerange="-500 500"/>
+    <general class="fetch" name="root_y_axis_joint" joint="root_y_axis_joint" ctrlrange="-20 20" forcerange="-500 500"/>
+    <general class="fetch" name="root_z_rotation_joint" joint="root_z_rotation_joint" ctrlrange="-3.1415927 3.1415927" forcerange="-150 150"/>
+    <general class="fetch" name="torso_lift_joint" joint="torso_lift_joint" ctrlrange="0 0.38615" forcerange="-450 450"/>
+    <general class="fetch" name="head_pan_joint" joint="head_pan_joint" ctrlrange="-1.57 1.57" forcerange="-0.32 0.32"/>
+    <general class="fetch" name="head_tilt_joint" joint="head_tilt_joint" ctrlrange="-0.76 1.45" forcerange="-0.68 0.68"/>
+    <general class="fetch" name="shoulder_pan_joint" joint="shoulder_pan_joint" ctrlrange="-1.6056 1.6056" forcerange="-33.82 33.82"/>
+    <general class="fetch" name="shoulder_lift_joint" joint="shoulder_lift_joint" ctrlrange="-1.221 1.518" forcerange="-131.76 131.76"/>
+    <general class="fetch" name="upperarm_roll_joint" joint="upperarm_roll_joint" ctrlrange="-3.1415927 3.1415927" forcerange="-76.94 76.94"/>
+    <general class="fetch" name="elbow_flex_joint" joint="elbow_flex_joint" ctrlrange="-2.251 2.251" forcerange="-66.18 66.18"/>
+    <general class="fetch" name="forearm_roll_joint" joint="forearm_roll_joint" ctrlrange="-3.1415927 3.1415927" forcerange="-29.35 29.35"/>
+    <general class="fetch" name="wrist_flex_joint" joint="wrist_flex_joint" ctrlrange="-2.16 2.16" forcerange="-25.7 25.7"/>
+    <general class="fetch" name="wrist_roll_joint" joint="wrist_roll_joint" ctrlrange="-3.1415927 3.1415927" forcerange="-7.36 7.36"/>
+    <!-- Remap original ctrlrange (0, 0.05) to (0, 1.0): 0.05 * 100 / 1.0 = 5 -->
+    <general class="fetch" name="act_gripper" tendon="gripper" forcerange="-100 100" ctrlrange="0 1.0" gainprm="5 0 0" biasprm="0 -100 -10"/>
+  </actuator>
+</mujoco>
