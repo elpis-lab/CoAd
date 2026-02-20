@@ -1,14 +1,32 @@
-# Planning with Goal Regions
-Experience-based planner with goal regions.  
+# PlanLOAD 
 
-* generate_DS_top1_mj.py/generate_DS_box1_mj.py generates the entire data structure over a specified object distribution for the free and box case respectively (can also condense)
-* condense_DS_top1_mjc.py/condense_DS_box1_mj.py condenses an existing data structure to a smaller collection of root paths
-* load_DS_top1_mjc.py/load_DS_box1_mj.py loads a condensed data structure and samples problems, mostly for visualization
-* benchmarking scripts sample a given number of problems and track success rates and solution times.
+## Dependency
 
-* Condensation currently has an early exit at 50% (to avoid running for too long)
-* All helper functions and classes are in utils/ src/ and planning_mj.py
-* assets/ contains files from [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie)
 
-* Some generated data structures can be found [here](https://drive.google.com/drive/folders/1wnXFksH5Kiec5IVMeo7Up51Fm-Xq73-X?usp=drive_link)
-* Free case data structures are large (many bins)
+
+## Run
+
+#### Generate task set
+```
+python plan_load/generate_task_set.py --env table --robot panda
+```
+
+#### Generate joint goal set from task set
+```
+python plan_load/generate_joint_goal_set.py --env table --robot panda --ik neighbor
+```
+
+#### Generate solution set from joint goal set
+```
+python plan_load/generate_task_paths.py --env table --robot panda --ik neighbor --planner RRTConnect
+```
+
+#### Run condensation to compress solution set
+```
+python plan_load/condense_task_paths.py --env table --robot panda --ik neighbor --planner RRTConnect --adaptation linear
+```
+
+#### Benchmark results
+```
+python plan_load/
+```
