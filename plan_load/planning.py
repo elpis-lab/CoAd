@@ -19,7 +19,7 @@ class OMPLPlanner:
     """
 
     def __init__(
-        self, robot: MujocoRobot, data=None, planner="RRTConnect", log=True
+        self, robot: MujocoRobot, data=None, planner="RRTConnect", log=False
     ):
         """Initialize Planner"""
         # Mujoco Robot with its model and data
@@ -231,7 +231,7 @@ class OMPLPlanner:
         """Check if the state is valid"""
         # set robot joint positions
         q = np.array([state[i] for i in range(self.n_dof)], dtype=float)
-        self.robot.set_joint_qpos(q, self.data)
+        self.robot.set_joint_qpos(q)
 
         # Check for collisions
         in_contact = self.robot.in_contact()

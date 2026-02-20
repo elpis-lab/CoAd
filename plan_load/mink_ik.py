@@ -10,6 +10,22 @@ from plan_load.mujoco_utils import sample_qpos
 from plan_load.robot import MujocoRobot, Panda, UR10, FetchArm
 
 
+def get_ik_solver(
+    robot: MujocoRobot, solver: str = "daqp", env_collision_geoms=None
+):
+    """Build an IK solver from robot; extend for other robot types as needed."""
+    if isinstance(robot, Panda):
+        ik_class = PandaIK
+    elif isinstance(robot, UR10):
+        ik_class = UR10IK
+    elif isinstance(robot, FetchArm):
+        ik_class = FetchArmIK
+    else:
+        raise ValueError("No IK solver for robot type.")
+
+    return ik_class(robot, solver, env_collision_geoms)
+
+
 class IK:
     """A meta IK package that uses mink"""
 
@@ -51,6 +67,7 @@ class IK:
         freeze_dof = list(
             np.setdiff1d(range(self.model.nv), self.free_dof_ids)
         )
+        self.constraints = []
         if len(freeze_dof) > 0:
             self.freeze_task = mink.DofFreezingTask(self.model, freeze_dof)
             self.constraints = [self.freeze_task]
@@ -141,6 +158,9 @@ class IK:
                     solver=self.solver,
                 )
             except Exception as e:
+                import traceback
+
+                traceback.print_exc()
                 return False, best_q
 
             # Integrate to new configuration

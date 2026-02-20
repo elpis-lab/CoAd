@@ -116,6 +116,7 @@ class Panda(MujocoRobot):
         "joint6",
         "joint7",
     ]
+    HOME_POS = [0, 0, 0, -np.pi / 2, 0, np.pi / 2, -np.pi / 4]
     FINGER = ["finger_joint1", "finger_joint2"]
     FINGER_OPEN = [0.04, 0.04]
     FINGER_CLOSED = [0.0, 0.0]
@@ -132,9 +133,11 @@ class Panda(MujocoRobot):
             ee_name="attachment_site",
             visualize=visualize,
         )
+        # Send to home
+        self.set_joint_qpos(self.HOME_POS)
 
         # Open the gripper
-        for i, finger in enumerate(self.FINGERS):
+        for i, finger in enumerate(self.FINGER):
             j_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, finger)
             self.data.qpos[model.jnt_qposadr[j_id]] = self.FINGER_OPEN[i]
         mujoco.mj_forward(model, self.data)
@@ -151,6 +154,7 @@ class UR10(MujocoRobot):
         "wrist_2_joint",
         "wrist_3_joint",
     ]
+    HOME_POS = [0, -1.7, 2, -1.87, -np.pi / 2, 0]
     FINGER = ["rh_r1", "rh_l1", "rh_r2", "rh_l2"]
     FINGER_OPEN = [0, 0, 0, 0]
     FINGER_CLOSED = [1.12, 1.12, 1.12, 1.12]
@@ -167,6 +171,8 @@ class UR10(MujocoRobot):
             ee_name="attachment_site",
             visualize=visualize,
         )
+        # Send to home
+        self.set_joint_qpos(self.HOME_POS)
 
 
 # TODO
@@ -176,18 +182,14 @@ class FetchArm(MujocoRobot):
 
 
 if __name__ == "__main__":
-    # # Test Panda
+    # Test Panda
     # model = mujoco.MjModel.from_xml_path("assets/franka_emika_panda/scene.xml")
     # robot = Panda(model, visualize=True)
-    # robot.set_joint_qpos(
-    #     np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785])
-    # )
     # robot.teleport_base(np.array([0.2, 0.0, 0.2]))
 
-    # # Test UR10
+    # Test UR10
     # model = mujoco.MjModel.from_xml_path("assets/ur10/scene.xml")
     # robot = UR10(model, visualize=True)
-    # robot.set_joint_qpos(np.array([np.pi / 2, -1.7, 2, -1.87, -np.pi / 2, 0]))
 
     # TODO
     # Test Fetch
