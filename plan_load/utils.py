@@ -3,7 +3,7 @@ import random
 import numpy as np
 import argparse
 
-from plan_load.env import MujocoEnv, TableEnv, BoxEnv, CageEnv, ShelfEnv
+from plan_load.env import MujocoEnv, TableEnv, BoxEnv, CageEnv, ShelfEnv, FreeEnv
 from plan_load.robot import MujocoRobot, Panda, UR10, FetchArm
 
 # for better printing
@@ -52,6 +52,8 @@ def load_env_and_robot(
         env = CageEnv(robot_name)
     elif env_name == "shelf":
         env = ShelfEnv(robot_name)
+    elif env_name == "free":
+        env = FreeEnv(robot_name)
     else:
         raise ValueError(f"Invalid environment: {env_name}")
 
