@@ -175,10 +175,42 @@ class UR10(MujocoRobot):
         self.set_joint_qpos(self.HOME_POS)
 
 
-# TODO
 class FetchArm(MujocoRobot):
-    # Skip the base joints and head joints
-    pass
+    """Fetch specialization."""
+
+    ARM = [
+        "torso_lift_joint",
+        "shoulder_pan_joint",
+        "shoulder_lift_joint",
+        "upperarm_roll_joint",
+        "elbow_flex_joint",
+        "forearm_roll_joint",
+        "wrist_flex_joint",
+        "wrist_roll_joint"
+    ]
+    FINGER = ["r_gripper_finger_joint", "l_gripper_finger_joint"]
+    FINGER_CLOSED = [0, 0]
+    FINGER_OPEN = [0.05, 0.05]
+    #TODO: Add a HOME_POS for Fetch
+
+    def __init__(self, model, data=None, visualize=False):
+        """Initialize FetchRobot"""
+        MujocoRobot.__init__(
+            self,
+            model,
+            joint_names=self.ARM,
+            root_link="base_link",
+            data=data,
+            collision_geom_group=3,
+            ee_name="attachment_site",
+            visualize=visualize,
+        )
+
+        # Open the gripper
+        for i, finger in enumerate(self.FINGER):
+            j_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, finger)
+            self.data.qpos[model.jnt_qposadr[j_id]] = self.FINGER_OPEN[i]
+        mujoco.mj_forward(model, self.data)
 
 
 if __name__ == "__main__":
@@ -195,7 +227,8 @@ if __name__ == "__main__":
     # Test Fetch
     model = mujoco.MjModel.from_xml_path("assets/fetch/scene.xml")
     robot = FetchArm(model, visualize=True)
-    robot.set_joint_qpos(np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+    robot.set_joint_qpos(np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+    robot.teleport_base(np.array([0.0, 0.0, 0.005]))
 
     # test collision checking
     in_contact = geoms_in_contact(model, robot.data, robot.robot_geoms, True)

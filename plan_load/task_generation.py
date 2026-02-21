@@ -139,42 +139,99 @@ def find_intersection(s1, s2):
     return xlim
 
 
-def rmin_rmax_from_square_corners(tw1, tw2, nominal_pose=[0, 0, 0]):
-    x_min = tw1[0]
-    y_min = tw1[1]
-    x_max = tw2[0]
-    y_max = tw2[1]
+def rmin_rmax_from_square_corners(tw1, tw2, nominal_pose=None):
+    x0, y0 = nominal_pose[0], nominal_pose[1]
 
-    if (x_min <= nominal_pose[0] <= x_max) and (
-        y_min <= nominal_pose[1] <= y_max
-    ):
-        r_min = 0.0
-    else:
-        nearest_x = np.clip(nominal_pose[0], x_min, x_max)
-        nearest_y = np.clip(nominal_pose[1], y_min, y_max)
-        r_min = np.sqrt(nearest_x**2 + nearest_y**2)
+    # robust min/max even if tw1/tw2 aren't ordered
+    x_min = tw1[0] if tw1[0] < tw2[0] else tw2[0]
+    x_max = tw2[0] if tw1[0] < tw2[0] else tw1[0]
+    y_min = tw1[1] if tw1[1] < tw2[1] else tw2[1]
+    y_max = tw2[1] if tw1[1] < tw2[1] else tw1[1]
 
-    corners = np.array(
-        [
-            [x_min, y_min],
-            [x_min, y_max],
-            [x_max, y_min],
-            [x_max, y_max],
-        ]
-    )
-    nominal_pose_mat = np.array(
-        [
-            nominal_pose[0:2],
-            nominal_pose[0:2],
-            nominal_pose[0:2],
-            nominal_pose[0:2],
-        ]
-    )
+    # r_min: distance from (x0,y0) to nearest point on rectangle
+    nx = x0
+    if nx < x_min: nx = x_min
+    elif nx > x_max: nx = x_max
 
-    r2 = (corners**2).sum(axis=1)
-    r_max = np.sqrt(r2.max())
+    ny = y0
+    if ny < y_min: ny = y_min
+    elif ny > y_max: ny = y_max
 
-    return r_min, r_max
+    dx = nx - x0
+    dy = ny - y0
+    r_min = np.hypot(dx, dy)  # 0 if inside rectangle
+
+    # r_max: max distance from (x0,y0) to the rectangle corners
+    dx1 = x_min - x0
+    dx2 = x_max - x0
+    dy1 = y_min - y0
+    dy2 = y_max - y0
+
+    # four corners: (dx1,dy1), (dx1,dy2), (dx2,dy1), (dx2,dy2)
+    r2_1 = dx1*dx1 + dy1*dy1
+    r2_2 = dx1*dx1 + dy2*dy2
+    r2_3 = dx2*dx2 + dy1*dy1
+    r2_4 = dx2*dx2 + dy2*dy2
+
+    r_max = np.sqrt(max(r2_1, r2_2, r2_3, r2_4))
+
+    return r_min, r_max  
+
+def rmin_rmax_from_box_corners(tw1, tw2, nominal_pose=(0.0, 0.0, 0.0)):
+    x0, y0, z0 = nominal_pose
+
+    # Robust min/max
+    x_min = tw1[0] if tw1[0] < tw2[0] else tw2[0]
+    x_max = tw2[0] if tw1[0] < tw2[0] else tw1[0]
+
+    y_min = tw1[1] if tw1[1] < tw2[1] else tw2[1]
+    y_max = tw2[1] if tw1[1] < tw2[1] else tw1[1]
+
+    z_min = tw1[2] if tw1[2] < tw2[2] else tw2[2]
+    z_max = tw2[2] if tw1[2] < tw2[2] else tw1[2]
+
+    # ---- r_min ----
+    nx = x0
+    if nx < x_min: nx = x_min
+    elif nx > x_max: nx = x_max
+
+    ny = y0
+    if ny < y_min: ny = y_min
+    elif ny > y_max: ny = y_max
+
+    nz = z0
+    if nz < z_min: nz = z_min
+    elif nz > z_max: nz = z_max
+
+    dx = nx - x0
+    dy = ny - y0
+    dz = nz - z0
+
+    r_min = np.sqrt(dx*dx + dy*dy + dz*dz)
+
+    # ---- r_max ----
+    dx1 = x_min - x0
+    dx2 = x_max - x0
+    dy1 = y_min - y0
+    dy2 = y_max - y0
+    dz1 = z_min - z0
+    dz2 = z_max - z0
+
+    # 8 corners
+    r2_vals = [
+        dx1*dx1 + dy1*dy1 + dz1*dz1,
+        dx1*dx1 + dy1*dy1 + dz2*dz2,
+        dx1*dx1 + dy2*dy2 + dz1*dz1,
+        dx1*dx1 + dy2*dy2 + dz2*dz2,
+        dx2*dx2 + dy1*dy1 + dz1*dz1,
+        dx2*dx2 + dy1*dy1 + dz2*dz2,
+        dx2*dx2 + dy2*dy2 + dz1*dz1,
+        dx2*dx2 + dy2*dy2 + dz2*dz2,
+    ]
+
+    r_max = np.sqrt(max(r2_vals))
+
+    return r_min, r_max 
 
 
 def panda_TSR_parameters(object_details, yaw_buffer, alpha):
@@ -253,8 +310,259 @@ def panda_TSR_parameters(object_details, yaw_buffer, alpha):
     """
     Ry90 = np.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]], dtype=float)
     Rz_m90 = np.array([[0, 1, 0], [-1, 0, 0], [0, 0, 1]], dtype=float)
-    R_new = Ry90 @ Rz_m90
-    # R_new = Ry90
+    #R_new = Ry90 @ Rz_m90
+    R_new = Ry90
+    Tew = np.eye(4)
+    Tew[:3, :3] = R_new
+
+    # Tew[0, 3] = -1*(ee_offset)
+    ee_offset_eeframe = np.array([0.0, 0.0, -ee_offset])
+    Tew[:3, 3] = R_new @ ee_offset_eeframe
+
+    del_geom_x = l_f - (object_size[0] / 2)
+    del_geom_y = l_f - (object_size[1] / 2)
+
+    Bw = np.array(
+        [
+            [-del_geom_x, del_geom_x],
+            [-del_geom_y, del_geom_y],
+            [0, 0],
+            [0 - yaw_buffer, 0 + yaw_buffer],
+            [0, 0],
+            [0, 0],
+        ]
+    )
+
+    # Approximating the intersection of all rotated TSR's with a conservative TSR
+    half_side = 0.5 * np.sqrt(2) * 0.5 * min(2 * del_geom_x, 2 * del_geom_y)
+
+    object_dist_check = np.sign(np.array(object_dist))
+    del_Bw = np.array(
+        [
+            (Bw[0, 1] - Bw[0, 0]) / 2,
+            (Bw[1, 1] - Bw[1, 0]) / 2,
+            (Bw[2, 1] - Bw[2, 0]) / 2,
+            (Bw[3, 1] - Bw[3, 0]) / 2,
+        ]
+    )
+    del_Bw = object_dist_check * del_Bw
+    Tw2_w1 = alpha * del_Bw
+
+    yaw_tw2_w1 = (
+        np.array([alpha * half_side, alpha * half_side, Tw2_w1[2]])
+        * object_dist_check[0:3]
+    )
+
+    TSR_params["front"] = (Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1)
+
+    # return Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1
+    return TSR_params
+
+def fetch_TSR_parameters(object_details, yaw_buffer, alpha):
+    object_position = object_details["position"]
+    object_size = object_details["size"]
+    object_dist = object_details["dist"]
+    TSR_params = {}
+    # Top TSR params
+
+    # Panda specifications
+    ee_z_offset = 0.02
+    # ee_z_offset = 0
+    s_f = 0.05
+
+    Tew = np.eye(4)
+    Tew[1, 1] = -1
+    Tew[2, 2] = -1
+    Tew[2, 3] = ee_z_offset + object_size[2] / 2
+    # Tew[2, 3] = ee_z_offset + object_size[2] / 4
+
+    del_geom = s_f
+    del_geom_x = s_f - (object_size[0] / 2)
+    del_geom_y = s_f - (object_size[1] / 2)
+
+    Bw = np.array(
+        [
+            [-del_geom_x, del_geom_x],
+            [-del_geom_y, del_geom_y],
+            [0, 0],
+            [0, 0],
+            [0, 0],
+            [0 - yaw_buffer, 0 + yaw_buffer],
+        ]
+    )
+
+    # Approximating the intersection of all rotated TSR's with a conservative TSR
+    half_side = 0.5 * np.sqrt(2) * 0.5 * min(2 * del_geom_x, 2 * del_geom_y)
+
+    object_dist_check = np.sign(np.array(object_dist))
+    del_Bw = np.array(
+        [
+            (Bw[0, 1] - Bw[0, 0]) / 2,
+            (Bw[1, 1] - Bw[1, 0]) / 2,
+            (Bw[2, 1] - Bw[2, 0]) / 2,
+            (Bw[5, 1] - Bw[5, 0]) / 2,
+        ]
+    )
+    del_Bw = object_dist_check * del_Bw
+    Tw2_w1 = alpha * del_Bw
+
+    yaw_tw2_w1 = (
+        np.array([alpha * half_side, alpha * half_side, Tw2_w1[2]])
+        * object_dist_check[0:3]
+    )
+
+    TSR_params["top"] = (Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1)
+
+    # Front TSR params
+    obj_offset = np.sqrt(object_size[0] ** 2 + object_size[1] ** 2) / 1
+    l_f = 0.05 / 2
+    ee_offset = l_f * 1.25
+
+    # Tew = np.eye(4)
+    # Tew[1, 1] = -1
+    # Tew[2, 2] = -1
+    # Tew[2, 3] = ee_z_offset + object_position[2]/2
+    # Tew[2, 3] = ee_z_offset + object_size[2]/4
+
+    """
+    Tew = np.array([
+        [ np.cos(np.pi/2), 0,  np.sin(np.pi/2), 0],
+        [ 0, 1,  0, 0],
+        [-np.sin(np.pi/2), 0,  np.cos(np.pi/2), 0],
+        [0, 0, 0, 1]
+    ])
+    """
+    Ry90 = np.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]], dtype=float)
+    Rx90 = np.array([[1, 0,  0], [0, 0, -1], [0, 1,  0]], dtype=float)
+    Rxm90 = np.array([[1, 0,  0], [0, 0, 1], [0, -1,  0]], dtype=float)
+    Rz_m90 = np.array([[0, 1, 0], [-1, 0, 0], [0, 0, 1]], dtype=float)
+    #R_new = Ry90 @ Rz_m90
+    R_new = Ry90 @ Rxm90
+    Tew = np.eye(4)
+    Tew[:3, :3] = R_new
+
+    # Tew[0, 3] = -1*(ee_offset)
+    ee_offset_eeframe = np.array([0.0, 0.0, -ee_offset])
+    Tew[:3, 3] = R_new @ ee_offset_eeframe
+
+    del_geom_x = l_f - (object_size[0] / 2)
+    del_geom_y = l_f - (object_size[1] / 2)
+
+    Bw = np.array(
+        [
+            [-del_geom_x, del_geom_x],
+            [-del_geom_y, del_geom_y],
+            [0, 0],
+            [0 - yaw_buffer, 0 + yaw_buffer],
+            [0, 0],
+            [0, 0],
+        ]
+    )
+
+    # Approximating the intersection of all rotated TSR's with a conservative TSR
+    half_side = 0.5 * np.sqrt(2) * 0.5 * min(2 * del_geom_x, 2 * del_geom_y)
+
+    object_dist_check = np.sign(np.array(object_dist))
+    del_Bw = np.array(
+        [
+            (Bw[0, 1] - Bw[0, 0]) / 2,
+            (Bw[1, 1] - Bw[1, 0]) / 2,
+            (Bw[2, 1] - Bw[2, 0]) / 2,
+            (Bw[3, 1] - Bw[3, 0]) / 2,
+        ]
+    )
+    del_Bw = object_dist_check * del_Bw
+    Tw2_w1 = alpha * del_Bw
+
+    yaw_tw2_w1 = (
+        np.array([alpha * half_side, alpha * half_side, Tw2_w1[2]])
+        * object_dist_check[0:3]
+    )
+
+    TSR_params["front"] = (Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1)
+
+    # return Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1
+    return TSR_params
+
+def ur10_TSR_parameters(object_details, yaw_buffer, alpha):
+    object_position = object_details["position"]
+    object_size = object_details["size"]
+    object_dist = object_details["dist"]
+    TSR_params = {}
+    # Top TSR params
+
+    # Panda specifications
+    ee_z_offset = -0.02
+    # ee_z_offset = 0
+    s_f = 0.05
+
+    Tew = np.eye(4)
+    Tew[1, 1] = -1
+    Tew[2, 2] = -1
+    Tew[2, 3] = ee_z_offset + object_size[2] / 2
+    # Tew[2, 3] = ee_z_offset + object_size[2] / 4
+
+    del_geom = s_f
+    del_geom_x = s_f - (object_size[0] / 2)
+    del_geom_y = s_f - (object_size[1] / 2)
+
+    Bw = np.array(
+        [
+            [-del_geom_x, del_geom_x],
+            [-del_geom_y, del_geom_y],
+            [0, 0],
+            [0, 0],
+            [0, 0],
+            [0 - yaw_buffer, 0 + yaw_buffer],
+        ]
+    )
+
+    # Approximating the intersection of all rotated TSR's with a conservative TSR
+    half_side = 0.5 * np.sqrt(2) * 0.5 * min(2 * del_geom_x, 2 * del_geom_y)
+
+    object_dist_check = np.sign(np.array(object_dist))
+    del_Bw = np.array(
+        [
+            (Bw[0, 1] - Bw[0, 0]) / 2,
+            (Bw[1, 1] - Bw[1, 0]) / 2,
+            (Bw[2, 1] - Bw[2, 0]) / 2,
+            (Bw[5, 1] - Bw[5, 0]) / 2,
+        ]
+    )
+    del_Bw = object_dist_check * del_Bw
+    Tw2_w1 = alpha * del_Bw
+
+    yaw_tw2_w1 = (
+        np.array([alpha * half_side, alpha * half_side, Tw2_w1[2]])
+        * object_dist_check[0:3]
+    )
+
+    TSR_params["top"] = (Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1)
+
+    # Front TSR params
+    obj_offset = np.sqrt(object_size[0] ** 2 + object_size[1] ** 2) / 1
+    l_f = 0.05 / 2
+    ee_offset = l_f * -0.75
+
+    # Tew = np.eye(4)
+    # Tew[1, 1] = -1
+    # Tew[2, 2] = -1
+    # Tew[2, 3] = ee_z_offset + object_position[2]/2
+    # Tew[2, 3] = ee_z_offset + object_size[2]/4
+
+    """
+    Tew = np.array([
+        [ np.cos(np.pi/2), 0,  np.sin(np.pi/2), 0],
+        [ 0, 1,  0, 0],
+        [-np.sin(np.pi/2), 0,  np.cos(np.pi/2), 0],
+        [0, 0, 0, 1]
+    ])
+    """
+    Ry90 = np.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]], dtype=float)
+    Rz_m90 = np.array([[0, 1, 0], [-1, 0, 0], [0, 0, 1]], dtype=float)
+    Rxm90 = np.array([[1, 0,  0], [0, 0, 1], [0, -1,  0]], dtype=float)
+    #R_new = Ry90 @ Rz_m90
+    R_new = Ry90 @ Rxm90
     Tew = np.eye(4)
     Tew[:3, :3] = R_new
 
@@ -385,7 +693,7 @@ def find_iTSR_set(
     problem_details,
     yaw_tw2_w1_dict,
     yaw_iTSR_set,
-    problem=None,
+    problem,
     robot_pos=[0.0, 0.0, 0.0],
 ):
 
@@ -641,19 +949,30 @@ def find_iTSR_set(
                     + (tw1_0[1] - object_position[1]) ** 2
                 )
 
-                rmin, rmax = rmin_rmax_from_square_corners(
-                    tw1_0, tw2_0, nominal_pose=robot_pos
-                )
+                #rmin, rmax = rmin_rmax_from_square_corners(
+                #    tw1_0, tw2_0, nominal_pose=robot_pos
+                #)
+
+                if problem['robot'] == 'fetch':
+                    #print("Using 2D check")
+                    rmin, rmax = rmin_rmax_from_square_corners(
+                        tw1_0, tw2_0, nominal_pose=robot_pos
+                    )
+                else:  
+                    rmin, rmax = rmin_rmax_from_box_corners(
+                        tw1_0, tw2_0, nominal_pose=robot_pos
+                    )
                 in_sample_space = (rmin <= reachable_ws) and (
                     rmax >= robot_clearance
                 )
+                #print(f"rmin {rmin}, rmax {rmax}")
 
-                if problem is None:
+                if problem['name'] is None:
                     in_problem = True
                 else:
                     problem_name = problem["name"]
 
-                    if problem_name == "box":
+                    if problem_name == "box" or problem_name == "cage" or problem_name == "table":
                         xmin = problem["intervals"][0][0]
                         xmax = problem["intervals"][0][1]
                         ymin = problem["intervals"][1][0]
@@ -668,7 +987,23 @@ def find_iTSR_set(
                             in_problem = True
                         else:
                             in_problem = False
+                    
+                    elif problem_name == "shelf":
+                        in_problem = False
+                        for region in problem['intervals']:
+                            xmin = region[0][0]
+                            xmax = region[0][1]
+                            ymin = region[1][0]
+                            ymax = region[1][1]
 
+                            if (
+                                xmin <= tw1_0[0] <= xmax and ymin <= tw1_0[1] <= ymax
+                                and xmin <= tw2_0[0] <= xmax and ymin <= tw2_0[1] <= ymax
+                            ):
+                                in_problem = True
+                                break
+
+                #print(f"in_sample_space: {in_sample_space}, in_problem: {in_problem}")
                 if dims[0] == 1 and dims[1] == 1:
                     curr_yaw_iTSR_set[curr_yaw_key] = [
                         B12_intersect,
