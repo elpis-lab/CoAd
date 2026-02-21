@@ -68,4 +68,5 @@ def load_env_and_robot(
     else:
         raise ValueError(f"Invalid robot: {robot_name}")
 
+    robot.teleport_base(pos=env.robot_pos, quat=env.robot_quat)
     return env, robot

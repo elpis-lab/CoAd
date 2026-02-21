@@ -233,6 +233,31 @@ def rmin_rmax_from_box_corners(tw1, tw2, nominal_pose=(0.0, 0.0, 0.0)):
 
     return r_min, r_max 
 
+def Tz(theta):
+    c, s = np.cos(theta), np.sin(theta)
+    T = np.eye(4)
+    T[:3,:3] = np.array([
+        [ c, -s, 0],
+        [ s,  c, 0],
+        [ 0,  0, 1],
+    ], dtype=float)
+    return T
+
+def Tx(theta):
+    c, s = np.cos(theta), np.sin(theta)
+    T = np.eye(4)
+    T[:3,:3] = np.array([
+        [1,  0,  0],
+        [0,  c, -s],
+        [0,  s,  c],
+    ], dtype=float)
+    return T
+
+def make_Tew_yaw_variants(Tew_base, angles=(0.0, np.pi/2, np.pi, 3*np.pi/2)):
+    return [Tz(th) @ Tew_base for th in angles]
+
+def make_Tew_x_variants(Tew_base, angles=(0.0, np.pi/2, np.pi, 3*np.pi/2)):
+    return [Tx(th) @ Tew_base for th in angles]
 
 def panda_TSR_parameters(object_details, yaw_buffer, alpha):
     object_position = object_details["position"]
@@ -251,6 +276,8 @@ def panda_TSR_parameters(object_details, yaw_buffer, alpha):
     Tew[2, 2] = -1
     Tew[2, 3] = ee_z_offset + object_size[2] / 2
     # Tew[2, 3] = ee_z_offset + object_size[2] / 4
+
+    Tews = make_Tew_yaw_variants(Tew)
 
     del_geom = s_f
     del_geom_x = s_f - (object_size[0] / 2)
@@ -287,7 +314,8 @@ def panda_TSR_parameters(object_details, yaw_buffer, alpha):
         * object_dist_check[0:3]
     )
 
-    TSR_params["top"] = (Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1)
+    #TSR_params["top"] = (Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1)
+    TSR_params["top"] = (Tews, Bw, half_side, Tw2_w1, yaw_tw2_w1)
 
     # Front TSR params
     obj_offset = np.sqrt(object_size[0] ** 2 + object_size[1] ** 2) / 1
@@ -318,6 +346,8 @@ def panda_TSR_parameters(object_details, yaw_buffer, alpha):
     # Tew[0, 3] = -1*(ee_offset)
     ee_offset_eeframe = np.array([0.0, 0.0, -ee_offset])
     Tew[:3, 3] = R_new @ ee_offset_eeframe
+
+    Tews = make_Tew_x_variants(Tew)
 
     del_geom_x = l_f - (object_size[0] / 2)
     del_geom_y = l_f - (object_size[1] / 2)
@@ -353,7 +383,8 @@ def panda_TSR_parameters(object_details, yaw_buffer, alpha):
         * object_dist_check[0:3]
     )
 
-    TSR_params["front"] = (Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1)
+    #TSR_params["front"] = (Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1)
+    TSR_params["front"] = (Tews, Bw, half_side, Tw2_w1, yaw_tw2_w1)
 
     # return Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1
     return TSR_params
