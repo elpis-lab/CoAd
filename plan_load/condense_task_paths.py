@@ -69,9 +69,9 @@ def condense_dataset(
 
         # Register new root path
         root_id = len(root_paths)
-        # after compression, root path and goal may be changed
-        _, center_path, q_end = adapter.compress(center_path, center_path)
-        root_paths[root_id] = center_path
+        # build adaptation around the center path
+        adapted_center, q_end = adapter.build_center(center_path)
+        root_paths[root_id] = adapted_center
         key_to_root[center_key] = (root_id, q_end)
         remaining.remove(center_key)
 
@@ -102,7 +102,7 @@ def condense_dataset(
             # Set up neighbor environment
             env.move_swept_volume(nb_key)
             # Try to compress neighbor into this root.
-            valid, _, q_nb_end = adapter.compress(center_path, nb_path)
+            valid, q_nb_end = adapter.compress(adapted_center, nb_path)
             if not valid:
                 continue
 
@@ -149,9 +149,11 @@ def main(args):
     # Solve problems
     # Load the joint space problem set
     try:
-        task_paths = pickle.load(
-            open(f"{folder}/task_paths_{args.ik}_{args.planner}.pkl", "rb")
-        )
+        d_name = f"{folder}/task_paths_data_{args.ik}_{args.planner}.npy"
+        data = np.load(d_name, allow_pickle=True)
+        k_name = f"{folder}/task_paths_keys_{args.ik}_{args.planner}.pkl"
+        keys = pickle.load(open(k_name, "rb"))
+        task_paths = {key: data for key, data in zip(keys, data)}
     except FileNotFoundError as e:
         print(e)
         print(

@@ -112,10 +112,10 @@ class OMPLPlanner:
                 path.interpolate(int(num_waypoints))
             # extract waypoints
             states = path.getStates()
-            waypoints = [
-                np.array([s[i] for i in range(self.n_dof)], dtype=float)
-                for s in states
-            ]
+            waypoints = np.array(
+                [[s[i] for i in range(self.n_dof)] for s in states],
+                dtype=np.float32,  # save memory
+            )
         else:
             if log:
                 print("Path planning failed.")
@@ -236,6 +236,21 @@ class OMPLPlanner:
         # Check for collisions
         in_contact = self.robot.in_contact()
         return not in_contact
+
+
+def euclidean_path_length(traj):
+    """Compute the length of a trajectory."""
+    if traj is None:
+        return 0.0
+    traj = np.asarray(traj, dtype=np.float64)
+    if traj.ndim != 2 or len(traj) < 2:
+        return 0.0
+
+    # Differences between consecutive states
+    diffs = np.diff(traj, axis=0)
+    # Euclidean norms of each segment
+    segment_lengths = np.linalg.norm(diffs, axis=1)
+    return np.sum(segment_lengths)
 
 
 # TODO

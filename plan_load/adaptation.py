@@ -13,15 +13,52 @@ class Adapter:
         self.robot = robot
         self.ik_solver = ik_solver
 
-    def compress(self, center_path, nb_path, ik_for_new_end=True):
-        """Compress the nb_path into the center_path"""
+    def build_center(self, center_path):
+        """Build the adapter center for using the given center path"""
+        raise NotImplementedError("Build center method not implemented")
+
+    def compress(self, center, nb_path, ik_for_new_end=True):
+        """Compress the nb_path into the adapter center"""
         raise NotImplementedError("Compress method not implemented")
 
-    def adapt(self, center_path, q_goal):
-        """Adapt the center_path for the q_goal"""
+    def adapt(self, center, q_goal):
+        """Adapt the adapter center for the q_goal"""
         raise NotImplementedError("Adapt method not implemented")
 
-    def use_ik_for_new_end(self, center_path, nb_path):
+
+class LinearAdapter(Adapter):
+    def build_center(self, center_path):
+        """
+        Build the adapter center for using the given center path
+        For this method, the adapter center is the same as the center path
+        """
+        return center_path, center_path[-1]
+
+    def compress(self, center, nb_path, ik_for_new_end=True):
+        """Compress the nb_path into the center_path"""
+        # Get end goal for neighbor
+        q_goal = nb_path[-1]
+        if ik_for_new_end:
+            reached, q = self.use_ik_for_new_end(center, nb_path)
+            if reached:
+                q_goal = q
+
+        # Direct interpolation
+        # Collision check
+        if not segment_validity_check(self.robot, center[-1], q_goal):
+            return False, None
+        return True, q_goal
+
+    def adapt(self, center, q_goal):
+        """Adapt the center_path to the q_goal"""
+        # Append q_goal to center_path
+        if isinstance(center_path, np.ndarray):
+            center_path = np.append(center_path, q_goal)
+        else:
+            center_path.append(list(q_goal))
+        return center_path
+
+    def use_ik_for_new_end(self, center, nb_path):
         """
         Use IK to find the new end goal.
         hopefully, it can be closer to the center path's end
@@ -33,74 +70,34 @@ class Adapter:
         target = self.robot.get_ee_pose()
         # Solve IK
         reached, q_nb_end = self.ik_solver.solve(
-            target,
-            current=center_path[-1],
-            use_col=False,
+            target, current=center[-1], use_col=False
         )
         if reached:
             q_goal = q_nb_end
         return reached, q_goal
 
 
-class LinearAdapter(Adapter):
-    def compress(self, center_path, nb_path, ik_for_new_end=True):
+class GRRAdapter(LinearAdapter):
+    def compress(self, center, nb_path, ik_for_new_end=True):
         """Compress the nb_path into the center_path"""
-        # Self, keep
-        if center_path is nb_path:
-            return True, center_path, center_path[-1]
-
-        # Get end goal for neighbor
-        q_goal = nb_path[-1]
-        if ik_for_new_end:
-            reached, q = self.use_ik_for_new_end(center_path, nb_path)
-            if reached:
-                q_goal = q
-
-        # Direct interpolation
-        # Collision check
-        if not segment_validity_check(self.robot, center_path[-1], q_goal):
-            return False, center_path, None
-        return True, center_path, q_goal
-
-    def adapt(self, center_path, q_goal):
-        """Adapt the center_path to the q_goal"""
-        # Append q_goal to center_path
-        if isinstance(center_path, np.ndarray):
-            center_path = np.append(center_path, q_goal)
-        else:
-            center_path.append(list(q_goal))
-        return center_path
-
-
-class GRRAdapter(Adapter):
-    def compress(self, center_path, nb_path, ik_for_new_end=True):
-        """Compress the nb_path into the center_path"""
-        # Self, keep
-        if center_path is nb_path:
-            return True, center_path, center_path[-1]
-
         # Get end goal for neighbor
         q_goal = nb_path[-1]  # original end goal
         if ik_for_new_end:
-            reached, q = self.use_ik_for_new_end(center_path, nb_path)
+            reached, q = self.use_ik_for_new_end(center, nb_path)
             if reached:
                 q_goal = q
 
         # GRR interpolation
         # Collision check
-        if not segment_validity_check(self.robot, center_path[-1], q_goal):
-            return False, center_path, None
+        if not segment_validity_check(self.robot, center[-1], q_goal):
+            return False, None
         # GRR continuity check
         if not segment_continuity_check(
-            self.robot, self.ik_solver, center_path[-1], q_goal
+            self.robot, self.ik_solver, center[-1], q_goal
         ):
-            return False, center_path, None
+            return False, None
 
-        return True, center_path, q_goal
-
-    def adapt(self, center_path, q_goal):
-        """Adapt the center_path to the q_goal"""
-        pass
+        return True, q_goal
 
 
 class DMPAdapter(Adapter):
@@ -122,23 +119,31 @@ def workspace_interpolate(p1, p2, alpha):
     return pose.flat()
 
 
-def segment_continuity_check(robot: MujocoRobot, ik_solver: IK, q1, q2):
+def segment_continuity_check(
+    robot: MujocoRobot, ik_solver: IK, q1, q2, epsilon=0.0, deviation=0.0
+):
     """Check if two configurations follow the continuous constraints
 
     Linearly interpolate and bisectionally visit and check
     with the help of a queue to avoid stack overflow issues
     """
-    epsilon = np.sqrt(robot.n_joints) * 0.05
-    deviation = 1.8
+    # if error not defined
+    if epsilon <= 0.0:
+        epsilon = np.sqrt(robot.n_joints) * 0.05
+    if deviation <= 0.0:
+        deviation = 1.8
+
+    # Get workspace points
     robot.set_joint_qpos(q1)
     p1 = robot.get_ee_pose()
     robot.set_joint_qpos(q2)
     p2 = robot.get_ee_pose()
 
+    # Divide path segments for bisecting continuity check
     n_divs = int(np.ceil(joint_distance(q1, q2) / epsilon))
+
     queue = deque()
     queue.append((q1, q2, 0, n_divs + 1))
-
     while len(queue) > 0:
         qa, qb, ia, ib = queue.popleft()
         d = joint_distance(qa, qb)

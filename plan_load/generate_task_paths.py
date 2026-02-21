@@ -10,7 +10,7 @@ from tqdm import tqdm
 from plan_load.utils import set_seed, load_env_and_robot, get_data_folder
 from plan_load.env import MujocoEnv
 from plan_load.robot import MujocoRobot
-from plan_load.planning import OMPLPlanner
+from plan_load.planning import OMPLPlanner, euclidean_path_length
 
 
 def solve_batch(
@@ -121,6 +121,7 @@ def solve_individual(
     plan_success = np.zeros(len(joint_goal_set), dtype=bool)
     solve_times = np.zeros(len(joint_goal_set), dtype=float)
     total_plan_times = np.zeros(len(joint_goal_set), dtype=float)
+    path_length = np.zeros(len(joint_goal_set), dtype=float)
     task_paths = {key: None for key in joint_goal_set.keys()}
 
     # Start solving
@@ -143,13 +144,15 @@ def solve_individual(
                 num_waypoints=200,
                 benchmark=True,
             )
-            if not path:
+            if path is None:
                 print(f"Planning failure for key: {key}")
                 plan_success[i] = False
                 task_paths[key] = None
+                path_length[i] = np.nan
             else:
                 plan_success[i] = True
                 task_paths[key] = path
+                path_length[i] = euclidean_path_length(path)
             solve_times[i] = planning_time
             total_plan_times[i] = total_time
 
@@ -174,7 +177,9 @@ def solve_individual(
                 f"Total Planning Time: {m_total:.4f}s"
             )
 
-    results = np.stack([plan_success, solve_times, total_plan_times], axis=1)
+    results = np.stack(
+        [plan_success, solve_times, total_plan_times, path_length], axis=1
+    )
     return task_paths, results
 
 
@@ -210,7 +215,7 @@ def main(args):
     suffix = f"{args.ik}_{args.planner}"
 
     # Check if graph data is already generated
-    data_exists = os.path.exists(f"{folder}/task_paths_{suffix}.pkl")
+    data_exists = os.path.exists(f"{folder}/task_paths_data_{suffix}.npy")
     if data_exists and not args.overwrite:
         print(
             f"Task paths already exists at {folder} "
@@ -241,10 +246,14 @@ def main(args):
     task_paths, results = solve_joint_goal_set(
         env, robot, joint_goal_set, args.planner
     )
+    # split data and keys to two separate files
+    keys = list(task_paths.keys())
+    data = np.array([path for path in task_paths.values()], dtype=object)
 
     # Save results
     np.save(f"{folder}/task_paths_results_{suffix}.npy", results)
-    pickle.dump(task_paths, open(f"{folder}/task_paths_{suffix}.pkl", "wb"))
+    np.save(f"{folder}/task_paths_data_{suffix}.npy", data)
+    pickle.dump(keys, open(f"{folder}/task_paths_keys_{suffix}.pkl", "wb"))
     robot.close()
 
 
