@@ -1,0 +1,27 @@
+robot_description: package://motion_bench_maker/configs/robots/ur5.yaml
+ompl_config: package://motion_bench_maker/configs/ompl/ompl_planning_ur5.yaml
+scene: package://motion_bench_maker/configs/scenes/bookshelf/scene_thin.yaml
+queries: package://motion_bench_maker/configs/scenes/bookshelf/easy_queries_thin.yaml
+variation: package://motion_bench_maker/configs/scenes/bookshelf/variation_thin.yaml
+sensors: package://motion_bench_maker/configs/scenes/bookshelf/sensors_thin.yaml
+planning_group: manipulator
+samples: 100
+base_offset:
+  position:
+  - 0.3
+  - 0.0
+  #- -0.1856000000000001
+  - 0.75
+  orientation:
+  - 0.0
+  - 0.0
+  - 0.0
+  - 1.0
+ee_offset:
+  position:
+  - -0.2
+  - 0.0
+  - 0.0
+  orientation:
+  - y
+ik_link_idx: 7

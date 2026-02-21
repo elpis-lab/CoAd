@@ -1,0 +1,9 @@
+goal_queries:
+  - objects: ["Box1"]
+    tag: "Top"
+    offset:
+      position: [0.0, 0.0, 0.125]
+      orientation: [1, 0, 0, 0]
+      position_tol: [0.0001, 0.0001, 0.0001]
+      orientation_tol: [0.003, 0.003, 0.003]
+    attached: "False"
