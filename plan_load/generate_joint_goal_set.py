@@ -19,19 +19,17 @@ from plan_load.mink_ik import get_ik_solver
 from plan_load.mujoco_utils import sample_qpos
 
 
-def get_ik_reference(
-    robot: MujocoRobot, key, ik_attempts, ik_method, **kwargs
-):
+def get_ik_reference(robot: MujocoRobot, key, attempts, ik_method, **kwargs):
     """Get a reference for IK solving"""
     # If using random method
     # or we have already tried the given method (attempts > 1)
     # use Random
-    if ik_method == "random" or ik_attempts > 1:
+    if ik_method == "random" or attempts > 1:
         seed = sample_qpos(robot.model, robot.joint_ids)
 
     # If method is not random but we have already tried the given method
     # set None to use the default ik solver pos
-    elif ik_attempts == 1:
+    elif attempts == 1:
         seed = None
 
     # Use given method
@@ -123,25 +121,34 @@ def convert_task_to_joint_goal(
         key_arr = np.array(key)
         key_center = (key_arr[:, 0] + key_arr[:, 1]) / 2
         obj_pose = Pose(key_center[:3], (0, 0, key_center[3])).matrix()
-        # ee target
-        target = matrix_to_flat(obj_pose @ env.ee_offset)
+        # multiple potential ee targets
+        targets = [
+            matrix_to_flat(obj_pose @ offset) for offset in env.ee_offset
+        ]
+        # give each target the same number of attempts
+        n_target_attempts = int(np.ceil(ik_max_attempts / len(targets)))
+        # ik_max_attempts = len(targets) * n_target_attempts
 
         # Start solving IK
         t0 = time.perf_counter()
         valid_ik = False
-        for ik_attempts in range(ik_max_attempts):
-            # Solve IK
-            reference = get_ik_reference(
-                robot, key, ik_attempts, ik_method, **method_args
-            )
-            reached, solution = ik_solver.solve(
-                target, reference, use_col=use_col
-            )
-            if reached:
-                robot.set_joint_qpos(solution)
-                if not robot.in_contact():
-                    valid_ik = True
-                    break
+        for target in targets:
+            for target_attempts in range(n_target_attempts):
+                # Solve IK
+                reference = get_ik_reference(
+                    robot, key, target_attempts, ik_method, **method_args
+                )
+                reached, solution = ik_solver.solve(
+                    target, reference, use_col=use_col
+                )
+
+                if reached:
+                    robot.set_joint_qpos(solution)
+                    if not robot.in_contact():
+                        valid_ik = True
+                        break
+            if valid_ik:
+                break
 
         ik_times[i] = time.perf_counter() - t0
         ik_success[i] = valid_ik
