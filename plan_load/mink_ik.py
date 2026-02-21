@@ -279,14 +279,93 @@ class UR10IK(IK):
         super().__init__(robot, solver, collision_pairs, max_velocities)
 
 
-# TODO
 class FetchArmIK(IK):
     """Fetch (arm only) IK class"""
+    GRIPPER = [
+        "gripper_link_c",
+        "r_gripper_finger_link_c",
+        "l_gripper_finger_link_c"
+    ]
 
-    pass
+    ARM = [
+        "torso_lift_link_c",
+        #"head_pan_link_c",
+        #"head_tilt_link_c",
+        "shoulder_pan_link_c",
+        "shoulder_lift_link_c",
+        "upperarm_roll_link_c",
+        "elbow_flex_link_c",
+        "forearm_roll_link_c",
+        "wrist_flex_link_c",
+        "wrist_roll_link_c",
+        "bellows_link_c",
+        #"estop_link_c",
+        #"laser_link_c",
+        "torso_fixed_link_c"
+    ]
+    
+    def __init__(
+        self,
+        robot: FetchArm,
+        solver: str = "daqp",
+        env_collision_geoms: list[str] = None,
+    ):
+        """Initialize the FetchArm IK class"""
+        # Collision constraints
+        # self collision
+        collision_pairs = [(self.GRIPPER, self.ARM)]
+        # environment collision
+        if env_collision_geoms is not None:
+            collision_pairs.append((self.GRIPPER, env_collision_geoms))
+        # Velocity limits
+        max_velocities = {name: np.pi for name in robot.joint_names}
+        super().__init__(robot, solver, collision_pairs, max_velocities)
 
 
-# TODO
-# Write some test cases for the IK classes
+
+
 if __name__ == "__main__":
-    pass
+    # Test Panda
+    model = mujoco.MjModel.from_xml_path("assets/franka_emika_panda/scene.xml")
+    robot = Panda(model, visualize=True)
+    robot.set_joint_qpos(
+        np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785])
+    )
+    robot.teleport_base(np.array([0.2, 0.0, 0.0]))
+    robotIK = PandaIK(robot)
+
+    # # Test UR10
+    # model = mujoco.MjModel.from_xml_path("assets/ur10/scene.xml")
+    # robot = UR10(model, visualize=True)
+    # robot.set_joint_qpos(np.array([np.pi / 2, -1.7, 2, -1.87, -np.pi / 2, 0]))
+    # robotIK = UR10IK(robot)
+
+    # # Test Fetch
+    # model = mujoco.MjModel.from_xml_path("assets/fetch/scene.xml")
+    # robot = FetchArm(model, visualize=True)
+    # robot.teleport_base(np.array([0.0, 0.0, 0.005]))
+    # robotIK = FetchArmIK(robot)
+    
+    # test IK
+    target_pos = [0.75, 0, 0.5]
+    #target_quat = [0.7071, 0, 0.7071, 0]
+    target_quat = [0, 0, 1, 0]
+    ik_target = np.array(target_pos + target_quat)
+    reached, q_ik = robotIK.solve(ik_target)
+    
+    print(reached, q_ik)
+    
+    if q_ik is not None:
+        print(f"IK reached: {reached}")
+        robot.set_joint_qpos(q_ik)
+
+    # test collision checking
+    print(f"in_contact: {robot.in_contact()}")
+    robot.viewer.sync()
+
+    # Keep the viewer
+    try:
+        while True:
+            time.sleep(0.01)
+    except KeyboardInterrupt:
+        robot.close()
