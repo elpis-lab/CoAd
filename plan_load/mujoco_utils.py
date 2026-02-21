@@ -17,6 +17,9 @@ def sample_qpos(
         raise ValueError("Either joint_ids or joint_names must be provided")
     lo, hi = joints_to_limits(model, joint_ids)
 
+    lo = np.where(np.isneginf(lo), -np.pi, lo)
+    hi = np.where(np.isposinf(hi),  np.pi, hi)
+
     # This function only works with regular hinge joints and slide joints
     for j_id in joint_ids:
         if model.jnt_type[j_id] not in [

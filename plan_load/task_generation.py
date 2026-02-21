@@ -407,6 +407,8 @@ def fetch_TSR_parameters(object_details, yaw_buffer, alpha):
     Tew[2, 3] = ee_z_offset + object_size[2] / 2
     # Tew[2, 3] = ee_z_offset + object_size[2] / 4
 
+    Tews = make_Tew_yaw_variants(Tew)
+
     del_geom = s_f
     del_geom_x = s_f - (object_size[0] / 2)
     del_geom_y = s_f - (object_size[1] / 2)
@@ -442,7 +444,8 @@ def fetch_TSR_parameters(object_details, yaw_buffer, alpha):
         * object_dist_check[0:3]
     )
 
-    TSR_params["top"] = (Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1)
+    #TSR_params["top"] = (Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1)
+    TSR_params["top"] = (Tews, Bw, half_side, Tw2_w1, yaw_tw2_w1)
 
     # Front TSR params
     obj_offset = np.sqrt(object_size[0] ** 2 + object_size[1] ** 2) / 1
@@ -476,6 +479,8 @@ def fetch_TSR_parameters(object_details, yaw_buffer, alpha):
     ee_offset_eeframe = np.array([0.0, 0.0, -ee_offset])
     Tew[:3, 3] = R_new @ ee_offset_eeframe
 
+    Tews = make_Tew_x_variants(Tew)
+
     del_geom_x = l_f - (object_size[0] / 2)
     del_geom_y = l_f - (object_size[1] / 2)
 
@@ -510,7 +515,8 @@ def fetch_TSR_parameters(object_details, yaw_buffer, alpha):
         * object_dist_check[0:3]
     )
 
-    TSR_params["front"] = (Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1)
+    #TSR_params["front"] = (Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1)
+    TSR_params["front"] = (Tews, Bw, half_side, Tw2_w1, yaw_tw2_w1)
 
     # return Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1
     return TSR_params
@@ -532,6 +538,8 @@ def ur10_TSR_parameters(object_details, yaw_buffer, alpha):
     Tew[2, 2] = -1
     Tew[2, 3] = ee_z_offset + object_size[2] / 2
     # Tew[2, 3] = ee_z_offset + object_size[2] / 4
+
+    Tews = make_Tew_yaw_variants(Tew)
 
     del_geom = s_f
     del_geom_x = s_f - (object_size[0] / 2)
@@ -568,7 +576,8 @@ def ur10_TSR_parameters(object_details, yaw_buffer, alpha):
         * object_dist_check[0:3]
     )
 
-    TSR_params["top"] = (Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1)
+    #TSR_params["top"] = (Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1)
+    TSR_params["top"] = (Tews, Bw, half_side, Tw2_w1, yaw_tw2_w1)
 
     # Front TSR params
     obj_offset = np.sqrt(object_size[0] ** 2 + object_size[1] ** 2) / 1
@@ -600,6 +609,8 @@ def ur10_TSR_parameters(object_details, yaw_buffer, alpha):
     # Tew[0, 3] = -1*(ee_offset)
     ee_offset_eeframe = np.array([0.0, 0.0, -ee_offset])
     Tew[:3, 3] = R_new @ ee_offset_eeframe
+
+    Tews = make_Tew_x_variants(Tew)
 
     del_geom_x = l_f - (object_size[0] / 2)
     del_geom_y = l_f - (object_size[1] / 2)
@@ -635,7 +646,8 @@ def ur10_TSR_parameters(object_details, yaw_buffer, alpha):
         * object_dist_check[0:3]
     )
 
-    TSR_params["front"] = (Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1)
+    #TSR_params["front"] = (Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1)
+    TSR_params["front"] = (Tews, Bw, half_side, Tw2_w1, yaw_tw2_w1)
 
     # return Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1
     return TSR_params
