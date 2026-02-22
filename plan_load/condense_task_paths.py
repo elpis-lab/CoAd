@@ -12,7 +12,9 @@ from plan_load.task_space import build_task_nn
 from plan_load.env import MujocoEnv
 from plan_load.robot import MujocoRobot
 from plan_load.mink_ik import get_ik_solver
-from plan_load.adaptation import LinearAdapter, GRRAdapter, DMPAdapter
+
+from plan_load.adaptation import LinearAdapter, GRRAdapter
+from plan_load.adaptation import DMPAdapter, TrajOptAdapter
 
 
 def condense_dataset(
@@ -34,6 +36,8 @@ def condense_dataset(
         adapter = GRRAdapter(robot, ik_solver)
     elif adaptation == "dmp":
         adapter = DMPAdapter(robot, ik_solver)
+    elif adaptation == "opt":
+        adapter = TrajOptAdapter(robot, ik_solver)
     else:
         raise ValueError(f"Invalid adaptation method: {adaptation}")
 
@@ -209,7 +213,7 @@ def parse_arguments():
         "--planner", choices=["RRTConnect", "PRMstar"], default="RRTConnect"
     )
     parser.add_argument(
-        "--adaptation", choices=["linear", "grr", "dmp"], default="grr"
+        "--adaptation", choices=["linear", "grr", "dmp", "opt"], default="grr"
     )
     parser.add_argument("--n_neighbors", type=int, default=1000)
 

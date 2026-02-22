@@ -8,6 +8,7 @@ from plan_load.mink_ik import IK
 
 from plan_load.adaptation_grr import segment_continuity_check
 from plan_load.adaptation_dmp import DMPDiscete, DMP
+from plan_load.adaptation_opt import TrajOpt
 
 
 class Adapter:
@@ -158,13 +159,11 @@ class DMPAdapter(Adapter):
         ik_solver: IK,
         # DMP parameters
         n_bfs=50,
-        dt=0.02,
         ay=None,
         by=None,
     ):
         super().__init__(robot, ik_solver)
         self.n_bfs = int(n_bfs)
-        self.dt = dt
         self.ay = ay
         self.by = by
 
@@ -209,10 +208,11 @@ class DMPAdapter(Adapter):
         # Try to restore using DMP;
         # if not feasible, refuse compression
         path = self.adapt(center, q_goal)
+
+        # Check collision
         valid = self.path_validity_check(path)
         if not valid:
             return False, q_goal
-
         # Check if the path is not far from desired goal
         if np.linalg.norm(path[-1] - q_goal) > 1e-2 * self.robot.n_joints:
             return False, q_goal
@@ -233,3 +233,54 @@ class DMPAdapter(Adapter):
         y_track, _, _ = dmp.rollout(timesteps=center.timesteps)
         y_track = np.asarray(y_track)
         return y_track
+
+
+class TrajOptAdapter(Adapter):
+    """Adapter using TrajOpt optimization"""
+
+    def __init__(
+        self,
+        robot: MujocoRobot,
+        ik_solver: IK,
+        # TrajOpt parameters
+        w_seed=1.0,
+        w_vel=1e-2,
+        w_acc=1.0,
+    ):
+        """Initialize the TrajOptAdapter"""
+        super().__init__(robot, ik_solver)
+        self.optimizer = TrajOpt(w_seed, w_vel, w_acc, robot.joint_limits)
+
+    def build_center(self, center_path):
+        """No need to optimize the center path"""
+        center_path = np.asarray(center_path)
+        return center_path, center_path[-1].copy()
+
+    def compress(self, center, nb_path, goal_refinement=True):
+        """Compress the nb_path into the center_path"""
+        q_goal = nb_path[-1]  # original end goal
+        if goal_refinement:
+            reached, q = self.ik_refinement(center[-1], nb_path[-1])
+            if reached:
+                q_goal = q
+
+        # Get the optimized path
+        path = self.adapt(center, q_goal)
+
+        # Check collision
+        valid = self.path_validity_check(path)
+        if not valid:
+            return False, q_goal
+        # Check if the path is not far from desired goal
+        if np.linalg.norm(path[-1] - q_goal) > 5e-3 * self.robot.n_joints:
+            return False, q_goal
+
+        return True, q_goal
+
+    def adapt(self, center, q_goal):
+        """Get the optimized path"""
+        ok, path = self.optimizer.solve(seed_traj=center, q_goal=q_goal)
+        # return the original path if the optimization failed
+        if not ok:
+            return center
+        return path
