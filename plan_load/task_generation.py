@@ -347,7 +347,9 @@ def panda_TSR_parameters(object_details, yaw_buffer, alpha):
     ee_offset_eeframe = np.array([0.0, 0.0, -ee_offset])
     Tew[:3, 3] = R_new @ ee_offset_eeframe
 
-    Tews = make_Tew_x_variants(Tew)
+    #Tews = make_Tew_x_variants(Tew)
+    Tews = make_Tew_yaw_variants(Tew)
+    #print(f"Tews length: {len(Tews)}")
 
     del_geom_x = l_f - (object_size[0] / 2)
     del_geom_y = l_f - (object_size[1] / 2)
@@ -479,7 +481,9 @@ def fetch_TSR_parameters(object_details, yaw_buffer, alpha):
     ee_offset_eeframe = np.array([0.0, 0.0, -ee_offset])
     Tew[:3, 3] = R_new @ ee_offset_eeframe
 
-    Tews = make_Tew_x_variants(Tew)
+    #Tews = make_Tew_x_variants(Tew)
+    Tews = make_Tew_yaw_variants(Tew)
+    #print(f"Tews length: {len(Tews)}")
 
     del_geom_x = l_f - (object_size[0] / 2)
     del_geom_y = l_f - (object_size[1] / 2)
@@ -610,7 +614,8 @@ def ur10_TSR_parameters(object_details, yaw_buffer, alpha):
     ee_offset_eeframe = np.array([0.0, 0.0, -ee_offset])
     Tew[:3, 3] = R_new @ ee_offset_eeframe
 
-    Tews = make_Tew_x_variants(Tew)
+    #Tews = make_Tew_x_variants(Tew)
+    Tews = make_Tew_yaw_variants(Tew)
 
     del_geom_x = l_f - (object_size[0] / 2)
     del_geom_y = l_f - (object_size[1] / 2)
