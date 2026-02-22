@@ -167,9 +167,6 @@ def convert_task_to_joint_goal(
         if robot.viewer is not None:
             robot.viewer.sync()
 
-        # if i>=750:
-        #    input(f"valid_ik: {valid_ik}, in_contact: {robot.in_contact()}")
-
         # Update tqdm message periodically
         print_interval = 500
         if (i + 1) % print_interval == 0:
