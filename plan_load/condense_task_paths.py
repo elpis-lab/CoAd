@@ -58,6 +58,8 @@ def condense_dataset(
     key_to_root = {
         key: (None, None) for key in task_paths.keys()
     }  # key -> (root_id, goal_q)
+    build_center_time = {key: np.nan for key in task_paths.keys()}
+    compress_time = {key: np.nan for key in task_paths.keys()}
 
     # Greedy condensation loop
     pbar = tqdm(total=len(remaining))
@@ -70,7 +72,10 @@ def condense_dataset(
         # Register new root path
         root_id = len(root_paths)
         # build adaptation around the center path
+        t0 = time.perf_counter()
         adapted_center, q_end = adapter.build_center(center_path)
+        t1 = time.perf_counter()
+        build_center_time[center_key] = t1 - t0
         root_paths[root_id] = adapted_center
         key_to_root[center_key] = (root_id, q_end)
         remaining.remove(center_key)
@@ -102,11 +107,14 @@ def condense_dataset(
             # Set up neighbor environment
             env.move_swept_volume(nb_key)
             # Try to compress neighbor into this root.
+            t0 = time.perf_counter()
             valid, q_nb_end = adapter.compress(adapted_center, nb_path)
+            t1 = time.perf_counter()
             if not valid:
                 continue
 
             # Neighbor successfully compressed into this root.
+            compress_time[nb_key] = t1 - t0
             key_to_root[nb_key] = (root_id, q_nb_end)
             remaining.remove(nb_key)
 
@@ -123,7 +131,13 @@ def condense_dataset(
 
     print("Condensation complete.")
     print(f"Number of root paths: {len(root_paths)}")
-    results = []
+    results = np.stack(
+        [
+            list(build_center_time.values()),
+            list(compress_time.values()),
+        ],
+        axis=1,
+    )
     return root_paths, key_to_root, results
 
 
@@ -181,7 +195,9 @@ def parse_arguments():
     # envs
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument(
-        "--env", choices=["table", "box", "cage", "shelf", "free"], default="table"
+        "--env",
+        choices=["table", "box", "cage", "shelf", "free"],
+        default="table",
     )
     parser.add_argument(
         "--robot", choices=["panda", "ur10", "fetch"], default="panda"

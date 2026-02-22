@@ -1,14 +1,4 @@
-## Robot
-
-- Add Fetch
-    - Mujoco XML and assets
-    - robot.py
-    - mink_ik.py
-
 ## Environments
-
-- Write a Meta class for environments
-    - env.py
 
 - Build the following environments:
     - Table Top
@@ -18,14 +8,11 @@
 
 ## Method
 
-### Graph Storage
-- Save as pickle (easier to use and more efficient)
-
 ### Condensation & Adaptation
-- Write a Meta class for Adatation
-    - adaptation.py
 
 - Implement Dynamic Movement Primitive
+
+- Implement optimization-based method (CHOMP, TrajOpt)
 
 ### Graph Building
 
@@ -35,11 +22,14 @@
 
 ## Benchmark
 
-- 
+- Write scripts for benchmarking
+    - time
+    - quality
+    - success
 
 ## Paper Writing
 
 - Title for the paper
 
-- 
+- Structure
 
