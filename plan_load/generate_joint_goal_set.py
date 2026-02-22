@@ -121,9 +121,33 @@ def convert_task_to_joint_goal(
         key_arr = np.array(key)
         key_center = (key_arr[:, 0] + key_arr[:, 1]) / 2
         obj_pose = Pose(key_center[:3], (0, 0, key_center[3])).matrix()
+
+        # removing unreachable offset from env.ee_offset
+
+        #if env.yaw_edges is not None and env.best_ee_offset_idx is not None:
+        if env.yaw_edges is not None and env.worst_ee_offset_idx is not None: 
+            yaw = (key_center[3] + np.pi) % (2*np.pi) - np.pi
+            k = np.searchsorted(env.yaw_edges, yaw, side="right") - 1
+            #k = np.clip(k, 0, len(env.best_ee_offset_idx) - 1)
+            # Tz180 = np.array([
+            #     [-1.0,  0.0, 0.0, 0.0],
+            #     [ 0.0, -1.0, 0.0, 0.0],
+            #     [ 0.0,  0.0, 1.0, 0.0],
+            #     [ 0.0,  0.0, 0.0, 1.0],
+            # ], dtype=float)
+            # Tew1 = env.ee_offset[env.best_ee_offset_idx[k]]
+            # Tew2 = Tew1 @ Tz180
+            # ee_offsets = [Tew1, Tew2]
+            k = np.clip(k, 0, len(env.worst_ee_offset_idx) - 1)
+            bad = int(env.worst_ee_offset_idx[k])
+            ee_offsets = [T for j, T in enumerate(env.ee_offset) if j != bad]
+
+        else:
+            ee_offsets = env.ee_offset.copy()
         # multiple potential ee targets
         targets = [
-            matrix_to_flat(obj_pose @ offset) for offset in env.ee_offset
+            #matrix_to_flat(obj_pose @ offset) for offset in env.ee_offset
+            matrix_to_flat(obj_pose @ offset) for offset in ee_offsets
         ]
         # give each target the same number of attempts
         n_target_attempts = int(np.ceil(ik_max_attempts / len(targets)))
@@ -158,6 +182,9 @@ def convert_task_to_joint_goal(
         # Update viewer
         if robot.viewer is not None:
             robot.viewer.sync()
+
+        #if i>=750:
+        #    input(f"valid_ik: {valid_ik}, in_contact: {robot.in_contact()}")
 
         # Update tqdm message periodically
         print_interval = 500

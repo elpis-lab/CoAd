@@ -23,6 +23,8 @@ from plan_load.robot import Panda
 from plan_load.robot import UR10
 from plan_load.robot import FetchArm
 
+def wrap_to_pi(a):
+    return (a + np.pi) % (2*np.pi) - np.pi
 
 class MujocoEnv:
     def __init__(self, robot):
@@ -273,6 +275,65 @@ class MujocoEnv:
             'reachable_ws': self.object_outer_rad,
             'robot_clearance': self.object_inner_rad
         }
+
+        if grasp_strategy == "front":
+            pass
+            p_nom = np.array([self.object_outer_rad, 0, 0])
+            from_robot_nom = p_nom - self.robot_pos
+            from_robot_nom[2] = 0.0
+            from_robot_nom /= (np.linalg.norm(from_robot_nom) + 1e-12)
+            
+            yaw1 = -self.object_yaw
+            yaw2 = self.object_yaw
+            yaw_edges = np.arange(yaw1, yaw2 + self.yaw_buffer, self.yaw_buffer)
+            yaw_centers = (yaw_edges[:-1] + yaw_edges[1:])*0.5
+            
+            #best_idx = np.zeros(len(yaw_centers), dtype=np.int64)
+            worst_idx = np.zeros(len(yaw_centers), dtype=np.int64)
+
+            z_axis = np.array([0.0, 0.0, 1.0])
+            Tews = self.ee_offset  # your 4 variants
+
+            for k, yaw in enumerate(yaw_centers):
+                # nominal obj rotation about world Z
+                cy, sy = np.cos(yaw), np.sin(yaw)
+                Rwo = np.array([[cy, -sy, 0.0],
+                                [sy,  cy, 0.0],
+                                [0.0, 0.0, 1.0]], dtype=float)
+
+                #best_s = -float("inf")
+                #best_i = 0
+                worst_s = float("inf")
+                worst_i = 0
+
+                for i, Tew in enumerate(Tews):
+                    Rwe = Rwo @ Tew[:3, :3]
+                    approach = Rwe @ z_axis
+                    approach[2] = 0.0
+                    na = np.linalg.norm(approach)
+                    if na > 1e-12:
+                        approach /= na
+
+                    s = float(np.dot(approach, from_robot_nom))
+                    #if s > best_s:
+                    #    best_s = s
+                    #    best_i = i
+                    if s < worst_s:
+                        worst_s = s
+                        worst_i = i
+
+                #best_idx[k] = best_i
+                worst_idx[k] = worst_i
+
+            self.yaw_edges = yaw_edges
+            #self.best_ee_offset_idx = best_idx
+            self.worst_ee_offset_idx = worst_idx
+
+        else:
+
+            self.yaw_edges = None
+            self.worst_ee_offset_idx = None
+
         self.problem_details = {
             f"{grasp_strategy}": self.problem_details_grasp
         }
@@ -349,7 +410,7 @@ class FreeEnv(MujocoEnv):
             self.object_inner_rad = 0.3
             self.object_outer_rad = 0.8
 
-        self.object_yaw = 0.5*np.pi #-yaw to +yaw
+        self.object_yaw = 0.25*np.pi #-yaw to +yaw
         self.object_details['dist'] = [
             self.object_outer_rad, self.object_outer_rad, 0, self.object_yaw
         ]
@@ -398,7 +459,7 @@ class BoxEnv(MujocoEnv):
         # Annulus of object positions
         self.object_inner_rad = 0.3
         self.object_outer_rad = 0.75
-        self.object_yaw = 0.5*np.pi #-yaw to +yaw
+        self.object_yaw = 0.25*np.pi #-yaw to +yaw
         self.object_details['dist'] = [
             self.object_outer_rad, self.object_outer_rad, 0, self.object_yaw
         ]
@@ -444,7 +505,7 @@ class CageEnv(MujocoEnv):
         # Annulus of object positions
         self.object_inner_rad = 0.3
         self.object_outer_rad = 0.75
-        self.object_yaw = 0.5*np.pi #-yaw to +yaw
+        self.object_yaw = 0.25*np.pi #-yaw to +yaw
         self.object_details['dist'] = [
             self.object_outer_rad, self.object_outer_rad, 0, self.object_yaw
         ]
@@ -496,7 +557,7 @@ class TableEnv(MujocoEnv):
             self.object_inner_rad = 0.3
             self.object_outer_rad = 0.8
 
-        self.object_yaw = 0.5*np.pi #-yaw to +yaw
+        self.object_yaw = 0.25*np.pi #-yaw to +yaw
         self.object_details['dist'] = [
             self.object_outer_rad, self.object_outer_rad, 0, self.object_yaw
         ]
@@ -530,7 +591,7 @@ class ShelfEnv(MujocoEnv):
         self.robot_quat = super().quat_xyzw_to_wxyz(config_yaml_data['base_offset']['orientation'])
 
         #shelf_thickness = 0.18
-        shelf_thickness = 0.1
+        shelf_thickness = 0.12
         dividing_wall_thickness = 0.14
         #bases = ['shelf_bottom', 'shelf_middle_bottom', 'shelf_middle', 'shelf_middle_top', 'shelf_top']
         bases = ['shelf_middle']
@@ -543,15 +604,15 @@ class ShelfEnv(MujocoEnv):
         # Annulus of object positions
         if robot == "panda":
             self.object_inner_rad = 0.3
-            self.object_outer_rad = 0.8
+            self.object_outer_rad = 0.75
         elif robot == "fetch":
             self.object_inner_rad = 0.3
-            self.object_outer_rad = 0.8
+            self.object_outer_rad = 0.75
         elif robot == "ur10":
             self.object_inner_rad = 0.3
             self.object_outer_rad = 0.65
 
-        self.object_yaw = 0.5*np.pi #-yaw to +yaw
+        self.object_yaw = 0.25*np.pi #-yaw to +yaw
         self.object_details['dist'] = [
             self.object_outer_rad, self.object_outer_rad, 0, self.object_yaw
         ]
