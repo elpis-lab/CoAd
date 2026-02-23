@@ -191,7 +191,7 @@ class FetchArm(MujocoRobot):
     FINGER = ["r_gripper_finger_joint", "l_gripper_finger_joint"]
     FINGER_CLOSED = [0, 0]
     FINGER_OPEN = [0.05, 0.05]
-    #TODO: Add a HOME_POS for Fetch
+    HOME_POS = [0, -1.5, 0, -np.pi, -np.pi / 2, 0, 0, 0]
 
     def __init__(self, model, data=None, visualize=False):
         """Initialize FetchRobot"""
@@ -205,6 +205,8 @@ class FetchArm(MujocoRobot):
             ee_name="attachment_site",
             visualize=visualize,
         )
+        # Send to home
+        self.set_joint_qpos(self.HOME_POS)
 
         # Open the gripper
         for i, finger in enumerate(self.FINGER):
@@ -227,7 +229,7 @@ if __name__ == "__main__":
     # Test Fetch
     model = mujoco.MjModel.from_xml_path("assets/fetch/scene.xml")
     robot = FetchArm(model, visualize=True)
-    robot.set_joint_qpos(np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+    #robot.set_joint_qpos(np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
     robot.teleport_base(np.array([0.0, 0.0, 0.005]))
 
     # test collision checking
