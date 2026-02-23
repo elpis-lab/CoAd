@@ -99,6 +99,11 @@ class MujocoRobot:
         self.model.body_quat[bid] = quat
         mujoco.mj_forward(self.model, self.data)
 
+    def in_limits(self, q):
+        """Check if a configuration is within joint limits"""
+        lo, hi = self.joint_limits
+        return np.all(q >= lo) and np.all(q <= hi)
+
     def close(self):
         if self.viewer is not None:
             self.viewer.close()
