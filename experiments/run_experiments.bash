@@ -19,16 +19,16 @@ envs=(
     #table
     #shelf
 )
-# adaptations=(
-#     grr
-#     opt
-#     dmp
-# )
+adaptations=(
+    grr
+    opt
+    #dmp
+)
 adaptation="opt"
 ik="neighbor"
 planner="RRTConnect"
-overwrite_task_set=true
-overwrite_joint_goal_set=true
+overwrite_task_set=false
+overwrite_joint_goal_set=false
 overwrite_task_paths=true
 overwrite_condensed_graph=true
 
@@ -78,29 +78,34 @@ for robot in "${robots[@]}"; do
         --planner "$planner"
     fi
 
-    # 4 Generate compressed graph
-    if [ "$overwrite_condensed_graph" = true ]; then
-      python "$PLAN_LOAD_DIR/condense_task_paths.py" \
-        --robot "$robot" \
-        --env "$env" \
-        --ik "$ik" \
-        --planner "$planner" \
-        --adaptation "$adaptation" \
-        --overwrite
-    else
-      python "$PLAN_LOAD_DIR/condense_task_paths.py" \
-        --robot "$robot" \
-        --env "$env" \
-        --ik "$ik" \
-        --planner "$planner" \
-        --adaptation "$adaptation"
-    fi
+    # 4 Condense for each adaptation
+    for adaptation in "${adaptations[@]}"; do
+      echo "=== Condensing: ${robot} in ${env}, adaptation=${adaptation} ==="
 
-    echo "Finished running experiment"
+      if [ "$overwrite_condensed_graph" = true ]; then
+        python "$PLAN_LOAD_DIR/condense_task_paths.py" \
+          --robot "$robot" \
+          --env "$env" \
+          --ik "$ik" \
+          --planner "$planner" \
+          --adaptation "$adaptation" \
+          --overwrite
+      else
+        python "$PLAN_LOAD_DIR/condense_task_paths.py" \
+          --robot "$robot" \
+          --env "$env" \
+          --ik "$ik" \
+          --planner "$planner" \
+          --adaptation "$adaptation"
+      fi
+
+      echo "Finished adaptation=${adaptation}"
+    done
+
   done
 done
 
 end_time=$(date +%s)
 elapsed=$(( end_time - start_time ))
 printf "=== All planning jobs completed in %02d:%02d:%02d ===\n" \
-    $((elapsed/3600)) $((elapsed%3600/60)) $((elapsed%60))
+  $((elapsed/3600)) $((elapsed%3600/60)) $((elapsed%60))

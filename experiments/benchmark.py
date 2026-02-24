@@ -52,7 +52,8 @@ def evaluate_graph(
     robot: MujocoRobot,
     root_paths,
     key_to_root,
-    adaptation
+    adaptation,
+    planning_results
 ):
     model, data = robot.model, robot.data
     home_qpos = robot.get_joint_qpos()
@@ -69,56 +70,65 @@ def evaluate_graph(
     else:
         raise ValueError(f"Invalid adaptation method: {adaptation}")
     
-
-    print(f"Number of solved paths: {len(key_to_root)}")
+    solved_keys = [k for k, (rid, _) in key_to_root.items() if rid is not None]
+    print(f"Number of solved paths: {len(solved_keys)}")
     print(f"Number of compressed root paths: {len(root_paths)}")
 
-    adaptation_times = {key: None for key in key_to_root.keys()}
-    planning_times = {key: None for key in key_to_root.keys()}
-    planning_total_times = {key: None for key in key_to_root.keys()}
-    
-    adapdation_length = {key: None for key in key_to_root.keys()}
-    planning_length = {key: None for key in key_to_root.keys()}
-    
-    adaptation_success = {key: None for key in key_to_root.keys()}
-    planning_success = {key: None for key in key_to_root.keys()}
+    adaptation_times = []
+    adaptation_lengths = []
+    adaptation_success = []
 
-    planner = OMPLPlanner(robot, data)
-
-    pbar = tqdm(enumerate(key_to_root), total=len(key_to_root))
-    for i, key in enumerate(key_to_root):
+    pbar = tqdm(enumerate(key_to_root), total=len(solved_keys))
+    for i, key in enumerate(solved_keys):
         #print(f"key index: {i}")
         env.move_swept_volume(key)
         t0 = time.perf_counter()
         root_id, curr_goal = key_to_root[key]
+        if root_id is None:
+            adaptation_success.append(False)
+            adaptation_lengths.append(np.nan)
+            continue
         curr_root = root_paths[root_id]
         adapted_path = adapter.adapt(curr_root, curr_goal)
         t1 = time.perf_counter()
-        adaptation_times[key] = t1 - t0
-        adapdation_length[key] = traj_len(adapted_path)
-
-        solved_path, total_time, planning_time = planner.plan(
-            start=home_qpos,
-            goal=curr_goal,
-            timeout=3.0,
-            num_waypoints=200,
-            benchmark=True,
-        )
-        planning_times[key] = planning_time
-        planning_total_times[key] = total_time
-        planning_length[key] = traj_len(solved_path)
+        dt = t1 - t0
+        adaptation_times.append(dt)
+        if adapted_path is None:
+            adaptation_success.append(False)
+            adaptation_lengths.append(np.nan)
+        else:
+            adaptation_success.append(True)
+            adaptation_lengths.append(traj_len(adapted_path))
 
         pbar.update(1)
 
-    mean_planning_time = np.mean(list(planning_times.values()))
-    mean_total_planning_time = np.mean(list(planning_total_times.values()))
-    mean_adaptation_time = np.mean(list(adaptation_times.values()))
+    adaptation_times = np.array(adaptation_times)
+    adaptation_lengths = np.array(adaptation_lengths)
+    adaptation_success = np.array(adaptation_success)
 
-    mean_planning_length = np.mean(list(planning_length.values()))
-    mean_adaptation_length = np.mean(list(adapdation_length.values()))
+    planning_success = planning_results[:, 0]
+    planning_times = planning_results[:, 1]
+    planning_total_times = planning_results[:, 2]
+    planning_lengths = planning_results[:, 3]
+
+    mean_planning_time = np.nanmean(planning_times)
+    mean_total_planning_time = np.nanmean(planning_total_times)
+    mean_adaptation_time = np.nanmean(adaptation_times)
+
+    mean_planning_length = np.nanmean(planning_lengths)
+    mean_adaptation_length = np.nanmean(adaptation_lengths)
+
+    np.savez(
+        f"data/benchmark_results_{adaptation}.npz",
+        planning_times=planning_times,
+        planning_lengths=planning_lengths,
+        planning_success=planning_success,
+        adaptation_times=adaptation_times,
+        adaptation_lengths=adaptation_lengths,
+        adaptation_success=adaptation_success,
+    )
 
     print(f"Mean planning time: {mean_planning_time}")
-    print(f"Mean total planning time: {mean_total_planning_time}")
     print(f"Mean adaptation time: {mean_adaptation_time}")
 
     print(f"Mean planning length: {mean_planning_length}")
@@ -139,7 +149,7 @@ def main(args):
     map_exists = os.path.exists(map_path)
     
     if not root_exists or not map_exists:
-        print("Compressed root paths"
+        print("Compressed root paths "
             + f"with IK '{args.ik}', planner '{args.planner}', "
             + f"and adaptation '{args.adaptation}' does NOT exist. "
             + "Use condense_task_paths.py to generate it."
@@ -159,22 +169,13 @@ def main(args):
     joint_goal_set_data = pickle.load(open(joint_goal_set_path, "rb"))
     
     print(f"Number of generated tasks: {len(task_set_data)}")
-    print(f"Number of solved tasks: {len(joint_goal_set_data)}")
+    print(f"Number of solved IK: {len(joint_goal_set_data)}")
 
-    evaluate_graph(env, robot, root_data, map_data, args.adaptation)
+    planning_results_path = f"{folder}/task_paths_results_neighbor_RRTConnect.npy"
+    planning_results = np.load(planning_results_path)
 
-# p1 = pickle.load(open(f"{folder1}/root_paths.pkl", "rb"))
-# p2 = pickle.load(open(f"{folder2}/root_paths.pkl", "rb"))
-# k1 = pickle.load(open(f"{folder1}/key_map.pkl", "rb"))
-# k2 = pickle.load(open(f"{folder2}/key_map.pkl", "rb"))
+    evaluate_graph(env, robot, root_data, map_data, args.adaptation, planning_results)
 
-# t1 = time.perf_counter()
-# print(get_avg_path_length(p1, k1))
-# t2 = time.perf_counter()
-# print(get_avg_path_length(p2, k2))
-# t3 = time.perf_counter()
-# print(f"Time taken for folder 1: {t2 - t1} seconds")
-# print(f"Time taken for folder 2: {t3 - t2} seconds")
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
