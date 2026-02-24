@@ -159,7 +159,8 @@ class UR10(MujocoRobot):
         "wrist_2_joint",
         "wrist_3_joint",
     ]
-    HOME_POS = [0, -1.7, 2, -1.87, -np.pi / 2, 0]
+    #HOME_POS = [0, -1.7, 2, -1.87, -np.pi / 2, 0]
+    HOME_POS = [0, -1.7, 1.75, -1.9, -np.pi / 2, 0]
     FINGER = ["rh_r1", "rh_l1", "rh_r2", "rh_l2"]
     FINGER_OPEN = [0, 0, 0, 0]
     FINGER_CLOSED = [1.12, 1.12, 1.12, 1.12]
