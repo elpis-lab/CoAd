@@ -205,15 +205,15 @@
                                 <joint name="l_gripper_finger_joint" axis="0 -1 0" class="gripper"/>
                               </body>
                             </body>
-                            <joint name="wrist_roll_joint" axis="1 0 0" type="hinge" limited="false" damping="5"/>
+                            <joint name="wrist_roll_joint" axis="1 0 0" type="hinge" limited="true" range="-6.283185 6.283185" damping="5"/>
                           </body>
                           <joint name="wrist_flex_joint" axis="0 1 0" type="hinge" range="-2.16 2.16" damping="1"/>
                         </body>
-                        <joint name="forearm_roll_joint" axis="1 0 0" type="hinge" limited="false" damping="5"/>
+                        <joint name="forearm_roll_joint" axis="1 0 0" type="hinge" limited="true" range="-6.283185 6.283185" damping="5"/>
                       </body>
                       <joint name="elbow_flex_joint" axis="0 1 0" type="hinge" range="-2.251 2.251" damping="1"/>
                     </body>
-                    <joint name="upperarm_roll_joint" axis="1 0 0" type="hinge" limited="false" damping="5"/>
+                    <joint name="upperarm_roll_joint" axis="1 0 0" type="hinge" limited="true" range="-6.283185 6.283185" damping="5"/>
                   </body>
                   <joint name="shoulder_lift_joint" axis="0 1 0" type="hinge" range="-1.221 1.518" damping="1"/>
                 </body>
