@@ -35,7 +35,10 @@ class OMPLPlanner:
 
         self.robot_geoms = self.robot.robot_geoms
         self.n_dof = self.robot.n_joints
-        self.joint_limits = self.robot.joint_limits
+        lo, hi = self.robot.joint_limits
+        lo = np.where(~np.isfinite(lo), -np.pi, lo)
+        hi = np.where(~np.isfinite(hi),  np.pi, hi)
+        self.joint_limits = (lo, hi)
 
         # Set up OMPL planner
         self.planner_name = planner

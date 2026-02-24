@@ -105,8 +105,6 @@ def joints_to_limits(
         if model.jnt_limited[j_id]:
             lo[i] = model.jnt_range[j_id][0]
             hi[i] = model.jnt_range[j_id][1]
-    lo = np.where(~np.isfinite(lo), -np.pi, lo)
-    hi = np.where(~np.isfinite(hi),  np.pi, hi)
     return lo, hi
 
 
