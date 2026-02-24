@@ -9,8 +9,8 @@ PLAN_LOAD_DIR="$ROOT_DIR/plan_load"
 start_time=$(date +%s)
 
 robots=(
-    panda
-    ur10
+    #panda
+    #ur10
     fetch
 )
 envs=(
@@ -19,14 +19,18 @@ envs=(
     #table
     #shelf
 )
-adaptations=(
-    grr
-    opt
-    dmp
-)
-ik="neighbor""
+# adaptations=(
+#     grr
+#     opt
+#     dmp
+# )
+adaptation="opt"
+ik="neighbor"
+planner="RRTConnect"
 overwrite_task_set=true
 overwrite_joint_goal_set=true
+overwrite_task_paths=true
+overwrite_condensed_graph=true
 
 for robot in "${robots[@]}"; do
   for env in "${envs[@]}"; do
@@ -58,7 +62,41 @@ for robot in "${robots[@]}"; do
         --ik "$ik"
     fi
 
-    echo "Finished building environment"
+    # 3 Generate task path set
+    if [ "$overwrite_task_paths" = true ]; then
+      python "$PLAN_LOAD_DIR/generate_task_paths.py" \
+        --robot "$robot" \
+        --env "$env" \
+        --ik "$ik" \
+        --planner "$planner" \
+        --overwrite
+    else
+      python "$PLAN_LOAD_DIR/generate_task_paths.py" \
+        --robot "$robot" \
+        --env "$env" \
+        --ik "$ik" \
+        --planner "$planner"
+    fi
+
+    # 4 Generate compressed graph
+    if [ "$overwrite_condensed_graph" = true ]; then
+      python "$PLAN_LOAD_DIR/condense_task_paths.py" \
+        --robot "$robot" \
+        --env "$env" \
+        --ik "$ik" \
+        --planner "$planner" \
+        --adaptation "$adaptation" \
+        --overwrite
+    else
+      python "$PLAN_LOAD_DIR/condense_task_paths.py" \
+        --robot "$robot" \
+        --env "$env" \
+        --ik "$ik" \
+        --planner "$planner" \
+        --adaptation "$adaptation"
+    fi
+
+    echo "Finished running experiment"
   done
 done
 
