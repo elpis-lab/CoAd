@@ -56,8 +56,6 @@ class Adapter:
         for i in range(len(path) - 1):
             q1 = path[i]
             q2 = path[i + 1]
-            if not self.robot.in_limits(q1):
-                return False
             if not self.segment_validity_check(q1, q2):
                 return False
         return True
@@ -74,12 +72,6 @@ class Adapter:
         reached, new_goal_joint = self.ik_solver.solve(
             target, current=ref_joint, use_col=False
         )
-        if reached:
-            self.robot.set_joint_qpos(new_goal_joint)
-            if self.robot.in_contact():
-                return False, new_goal_joint
-            if self.robot.in_limits(new_goal_joint):
-                return False, new_goal_joint
         return reached, new_goal_joint
 
 

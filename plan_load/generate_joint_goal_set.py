@@ -152,7 +152,7 @@ def convert_task_to_joint_goal(
 
                 if reached:
                     robot.set_joint_qpos(solution)
-                    if not robot.in_contact() and robot.in_limits(solution):
+                    if not robot.in_contact():
                         valid_ik = True
                         break
             if valid_ik:
