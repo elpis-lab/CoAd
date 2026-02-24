@@ -12,6 +12,9 @@ import mujoco
 from plan_load.robot import MujocoRobot
 
 
+def wrap_to_pi(angle):
+    return (angle + np.pi) % (2 * np.pi) - np.pi
+
 class OMPLPlanner:
     """
     OMPL Planner class for planning paths.
@@ -85,6 +88,17 @@ class OMPLPlanner:
         benchmark=False,
         log=False,
     ):
+        
+        # Wrap start and goal at any inf joints
+        lo, hi = self.robot.joint_limits
+        start = np.array(start, dtype=float).copy()
+        goal  = np.array(goal, dtype=float).copy()
+
+        inf_mask = np.isneginf(lo) & np.isposinf(hi)
+
+        start[inf_mask] = wrap_to_pi(start[inf_mask])
+        goal[inf_mask]  = wrap_to_pi(goal[inf_mask])
+
         # Set up start and goal states
         start_state = ob.State(self.si.getStateSpace())
         goal_state = ob.State(self.si.getStateSpace())
