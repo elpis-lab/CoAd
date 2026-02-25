@@ -396,6 +396,8 @@ class FreeEnv(MujocoEnv):
         """Initialize free environment"""
         super().__init__(robot)
         self.robot_pos = [0, 0, 0]
+        if robot == "fetch":
+            self.robot_pos = [0, 0, 0.005]
         self.robot_quat = [1, 0, 0, 0] #w,x,y,z
         self.object_details['position'] = [self.robot_pos[0], self.robot_pos[1], self.object_details['size'][2]/2]
 
@@ -767,21 +769,24 @@ if __name__=="__main__":
     # Load environment and generate task set
     robot = "fetch"
     #env = ShelfEnv(robot)
-    env = BoxEnv(robot)
+    env = TableEnv(robot)
     model, data = env.model, env.data
-    task_set = env.generate_task_set()
-    print(f"Bins generated: {len(task_set)}")
+    #task_set = env.generate_task_set()
+    #print(f"Bins generated: {len(task_set)}")
     # Load robot and test
     
     #robot = Panda(model, visualize=True)
     #robot.set_joint_qpos(
     #    np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785])
     #)
-    
 
-    robot = FetchArm(model, visualize=True)
-
+    robot = FetchArm(model, data, visualize=True)
     robot.teleport_base(np.array(env.robot_pos), np.array(env.robot_quat))
+
+    dummy_key = [[[50, 50], [50, 50], [50, 50]]]
+    env.move_swept_volume(dummy_key)
+
+    print(f"in contact: {robot.in_contact()}")
 
     robot.viewer.sync()
 

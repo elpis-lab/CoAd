@@ -41,7 +41,7 @@ def get_data_folder(env_name: str, robot_name: str) -> str:
 
 
 def load_env_and_robot(
-    env_name: str, robot_name: str, visualize: bool = True
+    env_name: str, robot_name: str, visualize: bool = False
 ) -> tuple[MujocoEnv, MujocoRobot]:
     # Build scene for given environment
     if env_name == "table":

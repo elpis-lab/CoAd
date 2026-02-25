@@ -12,6 +12,8 @@ import mujoco
 from plan_load.robot import MujocoRobot
 
 
+
+
 class OMPLPlanner:
     """
     OMPL Planner class for planning paths.
@@ -82,6 +84,7 @@ class OMPLPlanner:
         benchmark=False,
         log=False,
     ):
+        
         # Set up start and goal states
         start_state = ob.State(self.si.getStateSpace())
         goal_state = ob.State(self.si.getStateSpace())

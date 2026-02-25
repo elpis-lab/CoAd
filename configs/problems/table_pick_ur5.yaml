@@ -8,7 +8,7 @@ planning_group: manipulator
 samples: 100
 base_offset:
   position:
-  - 0.35
+  - 0.27
   - 0.0
   #- -0.3500000000000001
   - 0.65

@@ -8,7 +8,7 @@ planning_group: arm_with_torso
 samples: 100
 base_offset:
   position:
-  - 0.4
+  - 0.27
   - 0
   #- 0
   - 0.005

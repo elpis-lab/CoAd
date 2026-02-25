@@ -99,6 +99,11 @@ class MujocoRobot:
         self.model.body_quat[bid] = quat
         mujoco.mj_forward(self.model, self.data)
 
+    def in_limits(self, q):
+        """Check if a configuration is within joint limits"""
+        lo, hi = self.joint_limits
+        return np.all(q >= lo) and np.all(q <= hi)
+
     def close(self):
         if self.viewer is not None:
             self.viewer.close()
@@ -154,7 +159,8 @@ class UR10(MujocoRobot):
         "wrist_2_joint",
         "wrist_3_joint",
     ]
-    HOME_POS = [0, -1.7, 2, -1.87, -np.pi / 2, 0]
+    #HOME_POS = [0, -1.7, 2, -1.87, -np.pi / 2, 0]
+    HOME_POS = [0, -1.7, 1.75, -1.9, -np.pi / 2, 0]
     FINGER = ["rh_r1", "rh_l1", "rh_r2", "rh_l2"]
     FINGER_OPEN = [0, 0, 0, 0]
     FINGER_CLOSED = [1.12, 1.12, 1.12, 1.12]
@@ -191,7 +197,7 @@ class FetchArm(MujocoRobot):
     FINGER = ["r_gripper_finger_joint", "l_gripper_finger_joint"]
     FINGER_CLOSED = [0, 0]
     FINGER_OPEN = [0.05, 0.05]
-    #TODO: Add a HOME_POS for Fetch
+    HOME_POS = [0, -1.5, 0, -np.pi, -np.pi / 2, 0, 0, 0]
 
     def __init__(self, model, data=None, visualize=False):
         """Initialize FetchRobot"""
@@ -205,6 +211,8 @@ class FetchArm(MujocoRobot):
             ee_name="attachment_site",
             visualize=visualize,
         )
+        # Send to home
+        self.set_joint_qpos(self.HOME_POS)
 
         # Open the gripper
         for i, finger in enumerate(self.FINGER):
@@ -227,7 +235,7 @@ if __name__ == "__main__":
     # Test Fetch
     model = mujoco.MjModel.from_xml_path("assets/fetch/scene.xml")
     robot = FetchArm(model, visualize=True)
-    robot.set_joint_qpos(np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+    #robot.set_joint_qpos(np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
     robot.teleport_base(np.array([0.0, 0.0, 0.005]))
 
     # test collision checking
