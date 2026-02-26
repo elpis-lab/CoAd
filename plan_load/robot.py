@@ -44,7 +44,7 @@ class MujocoRobot:
         )
         self.n_joints = len(self.joint_ids)
         # get joint limits
-        self.joint_limits = joints_to_limits(model, self.joint_ids)
+        self.joint_limits = np.array(joints_to_limits(model, self.joint_ids))
 
         # get robot geoms from subtree
         self.robot_geoms = self.get_robot_geoms(collision_geom_group)
@@ -159,7 +159,7 @@ class UR10(MujocoRobot):
         "wrist_2_joint",
         "wrist_3_joint",
     ]
-    #HOME_POS = [0, -1.7, 2, -1.87, -np.pi / 2, 0]
+    # HOME_POS = [0, -1.7, 2, -1.87, -np.pi / 2, 0]
     HOME_POS = [0, -1.7, 1.75, -1.9, -np.pi / 2, 0]
     FINGER = ["rh_r1", "rh_l1", "rh_r2", "rh_l2"]
     FINGER_OPEN = [0, 0, 0, 0]
@@ -192,7 +192,7 @@ class FetchArm(MujocoRobot):
         "elbow_flex_joint",
         "forearm_roll_joint",
         "wrist_flex_joint",
-        "wrist_roll_joint"
+        "wrist_roll_joint",
     ]
     FINGER = ["r_gripper_finger_joint", "l_gripper_finger_joint"]
     FINGER_CLOSED = [0, 0]
@@ -235,7 +235,7 @@ if __name__ == "__main__":
     # Test Fetch
     model = mujoco.MjModel.from_xml_path("assets/fetch/scene.xml")
     robot = FetchArm(model, visualize=True)
-    #robot.set_joint_qpos(np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+    # robot.set_joint_qpos(np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
     robot.teleport_base(np.array([0.0, 0.0, 0.005]))
 
     # test collision checking
