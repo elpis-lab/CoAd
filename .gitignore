@@ -16,6 +16,4 @@ venv/
 .env/
 
 # Dataset
-*.pkl
-*.npy
-*.json
+data/

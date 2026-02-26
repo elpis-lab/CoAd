@@ -1,18 +1,4 @@
-## Environments
-
-- Build the following environments:
-    - Table Top
-    - Bin
-    - Cage
-    - Shelf
-
 ## Method
-
-### Condensation & Adaptation
-
-- Implement Dynamic Movement Primitive
-
-- Implement optimization-based method (CHOMP, TrajOpt)
 
 ### Graph Building
 
@@ -30,6 +16,4 @@
 ## Paper Writing
 
 - Title for the paper
-
-- Structure
 
