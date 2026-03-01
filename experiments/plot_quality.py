@@ -194,19 +194,86 @@ def plot_path_quality_boxplot(
     plt.show()
 
 
+def prepare_data(
+    robots,
+    envs,
+    methods,
+    metric="lengths",          # "lengths" or "times"
+    only_success=False,
+    time_in_ms=False,
+    method_name_map=None
+):
+    default_method_name_map = {
+        "RRT-Connect": ("rrtc", None),
+        "Library": ("library", None),
+        "LOAD-Interpolation": ("adaptations", "grr"),
+        "LOAD-TrajOpt": ("adaptations", "opt"),
+        "LOAD-DMP": ("adaptations", "dmp"),
+    }
+    if method_name_map is None:
+        method_name_map = default_method_name_map
+
+    data_out = {}
+
+    for robot in robots:
+        for env in envs:
+            data_path = f"data/baseline_results_{robot}_{env}.npz"
+
+            if not os.path.exists(data_path):
+                print(f"[Warn] Missing: {data_path} (filling NaNs)")
+                for m in methods:
+                    data_out[(robot, env, m)] = np.array([np.nan], dtype=float)
+                continue
+
+            npz = np.load(data_path, allow_pickle=True)
+            results = npz["results"].item()
+
+            for m in methods:
+                top_key, adapt_key = method_name_map[m]
+
+                if top_key in ("rrtc", "library"):
+                    values = np.asarray(results[top_key][metric], dtype=float)
+                    if only_success:
+                        success = np.asarray(results[top_key]["success"], dtype=bool)
+                        values = values[success]
+
+                elif top_key == "adaptations":
+                    values = np.asarray(results["adaptations"][metric][adapt_key], dtype=float)
+                    if only_success:
+                        success = np.asarray(results["adaptations"]["success"][adapt_key], dtype=bool)
+                        values = values[success]
+                else:
+                    raise ValueError(top_key)
+
+                values = values[np.isfinite(values)]
+                if metric == "times" and time_in_ms:
+                    values = values * 1000.0
+
+                # ensure non-empty so boxplot doesn't choke
+                if values.size == 0:
+                    values = np.array([np.nan], dtype=float)
+
+                data_out[(robot, env, m)] = values
+
+    return data_out
+
 if __name__ == "__main__":
     robots = ["UR10", "Fetch"]
     envs = ["Table", "Cage", "Shelf"]
     methods = [
         "RRT-Connect",
-        "RRT*",
-        "TrajOpt",
+        "Library",
+        #"TrajOpt",
         "LOAD-Interpolation",
-        "LOAD-DMV",
+        "LOAD-DMP",
         "LOAD-TrajOpt",
     ]
 
+    robots = ["panda", "fetch"]
+    envs = ["table", "cage", "shelf"]
+
     # TODO replace this with real data
-    data = generate_fake_data(robots, envs, methods, n_problems=1000, seed=42)
+    #data = generate_fake_data(robots, envs, methods, n_problems=1000, seed=42)
+    data = prepare_data(robots, envs, methods, only_success=False)
 
     plot_path_quality_boxplot(data, robots, envs, methods, save_name="quality")

@@ -645,8 +645,8 @@ def evaluate_graph(
         ompl_planner = OMPLPlanner(robot, data) 
     #ompl_planner = OMPLPlanner(robot, data)
 
-    N = 1000
-    #library = build_library(N, env, robot, home_qpos, key_to_root, solved_keys, data)
+    # Building library baseline with N = full library size
+    N = len(solved_task_paths_keys)
     library = Library(N, env, robot, home_qpos, key_to_roots[0], solved_keys, data)
 
     pbar = tqdm(enumerate(solved_keys), total=len(solved_keys))
@@ -819,6 +819,15 @@ def main(args):
     folder = get_data_folder(args.env, args.robot)
     suffix = f"{args.ik}_{args.planner}_{args.adaptation}_{args.n_neighbors}"
     
+    # ---- output path for this run ----
+    results_path = f"data/baseline_results_{args.robot}_{args.env}.npz"
+
+    # ---- skip if already computed ----
+    if os.path.exists(results_path) and not args.overwrite:
+        print(f"[Skip] Results already exist: {results_path}")
+        print("       Use --overwrite to re-run benchmarking.")
+        return
+
     try:
         task_set = pickle.load(open(f"{folder}/task_set.pkl", "rb"))
         joint_goal_set = pickle.load(open(f"{folder}/joint_goal_set_{args.ik}.pkl", "rb"))
