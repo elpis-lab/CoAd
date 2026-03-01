@@ -178,6 +178,56 @@ class MujocoEnv:
 
         return R_cyl, b_pos, b1_size, b2_size, corners
 
+    def cube_object_xml(self, object_dims, object_pose, fixed=False):
+        """Create cube object xml string"""
+        rgba = [0.8, 0.2, 0.2, 1]
+        name = "cube_object"
+        object_x, object_y, object_z, object_yaw = object_pose
+        half = 0.5 * float(object_yaw)
+        qw = np.cos(half)
+        qx = 0.0
+        qy = 0.0
+        qz = np.sin(half)
+
+        joint_xml = "" if fixed else f'<joint name="{name}_free" type="free"/>'
+
+        obj_xml = f"""
+        <body name="{name}" 
+            pos="{object_x} {object_y} {object_z}"
+            quat="{qw} {qx} {qy} {qz}">
+            {joint_xml}
+
+            <!-- boxes centered at body origin -->
+            <geom name="sv_box1" type="box" pos="0 0 0"
+                size="{object_dims[0]/2} {object_dims[1]/2} {object_dims[2]/2}"
+                rgba="{rgba[0]} {rgba[1]} {rgba[2]} {rgba[3]}"/>
+        </body>
+        """
+        return obj_xml
+    
+    def move_cube_object(self, object_pose):
+        """
+        Move cube_object to (x, y, z, yaw) by writing into its free joint qpos.
+        object_pose: iterable length-4: (x, y, z, yaw) in radians
+        """
+        x, y, z, yaw = object_pose
+
+        jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "cube_object_free")
+        qadr = self.model.jnt_qposadr[jid]
+        vadr = self.model.jnt_dofadr[jid]
+
+        half = 0.5 * float(yaw)
+        qw = np.cos(half)
+        qx = 0.0
+        qy = 0.0
+        qz = np.sin(half)
+
+        # free joint qpos layout: [x y z qw qx qy qz]
+        self.data.qpos[qadr:qadr+7] = [x, y, z, qw, qx, qy, qz]
+        self.data.qvel[vadr:vadr+6] = 0.0
+
+        mujoco.mj_forward(self.model, self.data)
+
     def cube_swept_volume_xml(self, object_dims, object_configs, fixed=False):
         """Create swept volume xml string"""
         rgba = [0.8, 0.8, 0.8, 1]
@@ -392,7 +442,7 @@ class MujocoEnv:
 
 class FreeEnv(MujocoEnv):
     """Free environment"""
-    def __init__(self, robot):
+    def __init__(self, robot, no_sv=False):
         """Initialize free environment"""
         super().__init__(robot)
         self.robot_pos = [0, 0, 0]
@@ -425,7 +475,10 @@ class FreeEnv(MujocoEnv):
         sv_config = super().initialize_TSR_parameters(robot, grasp_strategy="top")
 
         # Add environment xmls and build model
-        sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config)
+        if no_sv==False:
+            sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config)
+        else:
+            sv_xml = super().cube_object_xml(self.object_details['size'], [1, 1, 0, 0])
         xmls_to_add = [sv_xml]
         free_xml_path = f"{self.robot_dir}/free_scene.xml"
         self.model, self.data = super().build_model(free_xml_path, xmls_to_add)
@@ -433,7 +486,7 @@ class FreeEnv(MujocoEnv):
         
 class BoxEnv(MujocoEnv):
     """Box environment"""
-    def __init__(self, robot):
+    def __init__(self, robot, no_sv=False):
         """Initialize box environment"""
         super().__init__(robot)
         if robot=="panda":
@@ -469,7 +522,11 @@ class BoxEnv(MujocoEnv):
         sv_config = super().initialize_TSR_parameters(robot, grasp_strategy="top")
         
         # Add environment xmls and build model
-        sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config)
+        #sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config)
+        if no_sv==False:
+            sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config)
+        else:
+            sv_xml = super().cube_object_xml(self.object_details['size'], [1, 1, 0, 0])
         box_xml = super().build_xml(parent_body_name="scene_box", skip_ids={"Can1"})
         
         xmls_to_add = [sv_xml, box_xml]
@@ -479,7 +536,7 @@ class BoxEnv(MujocoEnv):
 
 class CageEnv(MujocoEnv):
     """Cage environment"""
-    def __init__(self, robot):
+    def __init__(self, robot, no_sv=False):
         """Initialize cage environment"""
         super().__init__(robot)
         if robot=="panda":
@@ -515,7 +572,11 @@ class CageEnv(MujocoEnv):
         sv_config = super().initialize_TSR_parameters(robot, grasp_strategy="top")
         
         # Add environment xmls and build model
-        sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config)
+        #sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config)
+        if no_sv==False:
+            sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config)
+        else:
+            sv_xml = super().cube_object_xml(self.object_details['size'], [1, 1, 0, 0])
         cage_xml = super().build_xml(parent_body_name="scene_cage", skip_ids={"Cube1"})
         
         xmls_to_add = [sv_xml, cage_xml]
@@ -525,7 +586,7 @@ class CageEnv(MujocoEnv):
 
 class TableEnv(MujocoEnv):
     """Table environment"""
-    def __init__(self, robot):
+    def __init__(self, robot, no_sv=False):
         """Initialize table environment"""
         super().__init__(robot)
         if robot=="panda":
@@ -567,7 +628,11 @@ class TableEnv(MujocoEnv):
         sv_config = super().initialize_TSR_parameters(robot, grasp_strategy="top")
         
         # Add environment xmls and build model
-        sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config)
+        #sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config)
+        if no_sv==False:
+            sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config)
+        else:
+            sv_xml = super().cube_object_xml(self.object_details['size'], [1, 1, 0, 0])
         table_xml = super().build_xml(parent_body_name="scene_table", skip_ids={"Cube1"})
         
         xmls_to_add = [sv_xml, table_xml]
@@ -576,7 +641,7 @@ class TableEnv(MujocoEnv):
 
 class ShelfEnv(MujocoEnv):
     """Thin shelf environment"""
-    def __init__(self, robot):
+    def __init__(self, robot, no_sv=False):
         """Initialize thin shelf environment"""
         super().__init__(robot)
         if robot=="panda":
@@ -622,7 +687,11 @@ class ShelfEnv(MujocoEnv):
         sv_config = super().initialize_TSR_parameters(robot, grasp_strategy="front")
 
         # Add environment xmls and build model
-        sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config)
+        #sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config)
+        if no_sv==False:
+            sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config)
+        else:
+            sv_xml = super().cube_object_xml(self.object_details['size'], [1, 1, 0, 0])
         shelf_xml = super().build_xml(parent_body_name="scene_shelf", skip_ids={"Cube1"})
         
         xmls_to_add = [sv_xml, shelf_xml]
@@ -767,7 +836,7 @@ class ShelfEnv(MujocoEnv):
 
 if __name__=="__main__":
     # Load environment and generate task set
-    robot = "fetch"
+    robot = "panda"
     #env = ShelfEnv(robot)
     env = TableEnv(robot)
     model, data = env.model, env.data
@@ -776,18 +845,23 @@ if __name__=="__main__":
     # Load robot and test
     
     #robot = Panda(model, visualize=True)
-    #robot.set_joint_qpos(
+    # robot.set_joint_qpos(
     #    np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785])
-    #)
+    # )
 
-    robot = FetchArm(model, data, visualize=True)
-    robot.teleport_base(np.array(env.robot_pos), np.array(env.robot_quat))
+    robot = Panda(model, data, visualize=True)
+    robot.teleport_base(np.array([env.robot_pos]), np.array(env.robot_quat))
 
-    dummy_key = [[[50, 50], [50, 50], [50, 50]]]
-    env.move_swept_volume(dummy_key)
+    # Configure camera
+    robot.viewer.cam.lookat[:] = [0.25, -0.25, 0.5]
+    robot.viewer.cam.distance = 1.75
+    robot.viewer.cam.azimuth = 120
+    robot.viewer.cam.elevation = -20
+    
+    pos1 = [[1, 0], [0, 0], [0.05, 0.05], [0, 0]]
+    env.move_swept_volume(pos1)
 
     print(f"in contact: {robot.in_contact()}")
-
     robot.viewer.sync()
 
     # Keep the viewer
