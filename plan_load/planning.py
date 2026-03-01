@@ -21,7 +21,7 @@ class OMPLPlanner:
     """
 
     def __init__(
-        self, robot: MujocoRobot, data=None, planner="RRTConnect", log=False
+        self, robot: MujocoRobot, data=None, planner="RRTConnect", rrtc_range=None, log=False
     ):
         """Initialize Planner"""
         # Mujoco Robot with its model and data
@@ -38,6 +38,7 @@ class OMPLPlanner:
         self.robot_geoms = self.robot.robot_geoms
         self.n_dof = self.robot.n_joints
         self.joint_limits = self.robot.joint_limits
+        self.range = rrtc_range
 
         # Set up OMPL planner
         self.planner_name = planner
@@ -45,6 +46,8 @@ class OMPLPlanner:
         self.planner = self.ss.getPlanner()
         if not log:
             ou.setLogLevel(ou.LOG_ERROR)
+
+        
 
     def set_up_ompl(self):
         """Setup OMPL planner"""
@@ -70,8 +73,16 @@ class OMPLPlanner:
         # Optimization objective (default path length)
         ss.setOptimizationObjective(ob.PathLengthOptimizationObjective(si))
 
+        planner = getattr(og, self.planner_name)(si)
+
+        # ---- Adaptive range ----
+        if self.planner_name == "RRTConnect" and self.range is not None:
+            extent = si.getMaximumExtent()
+            planner.setRange(self.range * extent)
+
         # Setting up OMPL planner
-        ss.setPlanner(getattr(og, self.planner_name)(si))
+        #ss.setPlanner(getattr(og, self.planner_name)(si))
+        ss.setPlanner(planner)
         return ss, si
 
     def plan(
