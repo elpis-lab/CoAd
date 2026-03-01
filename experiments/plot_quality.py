@@ -194,15 +194,93 @@ def plot_path_quality_boxplot(
     plt.show()
 
 
+# def prepare_data(
+#     robots,
+#     envs,
+#     methods,
+#     metric="lengths",          # "lengths" or "times"
+#     only_success=True,
+#     time_in_ms=True,
+#     method_name_map=None
+# ):
+#     default_method_name_map = {
+#         "RRT-Connect": ("rrtc", None),
+#         "Library": ("library", None),
+#         "LOAD-Interpolation": ("adaptations", "grr"),
+#         "LOAD-TrajOpt": ("adaptations", "opt"),
+#         "LOAD-DMP": ("adaptations", "dmp"),
+#     }
+#     if method_name_map is None:
+#         method_name_map = default_method_name_map
+
+#     data_out = {}
+
+#     for robot in robots:
+#         for env in envs:
+#             data_path = f"data/baseline_results_{robot}_{env}.npz"
+
+#             if not os.path.exists(data_path):
+#                 print(f"[Warn] Missing: {data_path} (filling NaNs)")
+#                 for m in methods:
+#                     data_out[(robot, env, m)] = np.array([np.nan], dtype=float)
+#                 continue
+
+#             npz = np.load(data_path, allow_pickle=True)
+#             results = npz["results"].item()
+
+#             for m in methods:
+#                 top_key, adapt_key = method_name_map[m]
+
+#                 if top_key in ("rrtc", "library"):
+#                     values = np.asarray(results[top_key][metric], dtype=float)
+#                     if only_success:
+#                         success = np.asarray(results[top_key]["success"], dtype=bool)
+#                         values = values[success]
+
+#                 elif top_key == "adaptations":
+#                     values = np.asarray(results["adaptations"][metric][adapt_key], dtype=float)
+#                     if only_success:
+#                         success = np.asarray(results["adaptations"]["success"][adapt_key], dtype=bool)
+#                         values = values[success]
+#                 else:
+#                     raise ValueError(top_key)
+
+#                 values = values[np.isfinite(values)]
+#                 if metric == "times" and time_in_ms:
+#                     values = values * 1000.0
+
+#                 # ensure non-empty so boxplot doesn't choke
+#                 if values.size == 0:
+#                     values = np.array([np.nan], dtype=float)
+
+#                 data_out[(robot, env, m)] = values
+
+#     return data_out
+
+import os
+import numpy as np
+
 def prepare_data(
     robots,
     envs,
     methods,
     metric="lengths",          # "lengths" or "times"
-    only_success=False,
-    time_in_ms=False,
-    method_name_map=None
+    only_success=True,
+    time_in_ms=True,
+    method_name_map=None,
+    fill_missing_with_nan=True,
+    strict_align_assert=True,
 ):
+    """
+    Loads data/baseline_results_{robot}_{env}.npz and returns:
+        data_out[(robot, env, method)] = 1D np.array of values
+
+    Corrections vs your original:
+      - Always masks by success indices first (if only_success=True),
+        so failures (even if stored as 0) are excluded.
+      - Asserts alignment between success and metric arrays (optional).
+      - Handles missing files by filling NaNs (optional).
+    """
     default_method_name_map = {
         "RRT-Connect": ("rrtc", None),
         "Library": ("library", None),
@@ -213,6 +291,9 @@ def prepare_data(
     if method_name_map is None:
         method_name_map = default_method_name_map
 
+    if metric not in ("lengths", "times"):
+        raise ValueError(f"metric must be 'lengths' or 'times', got {metric}")
+
     data_out = {}
 
     for robot in robots:
@@ -220,36 +301,58 @@ def prepare_data(
             data_path = f"data/baseline_results_{robot}_{env}.npz"
 
             if not os.path.exists(data_path):
-                print(f"[Warn] Missing: {data_path} (filling NaNs)")
-                for m in methods:
-                    data_out[(robot, env, m)] = np.array([np.nan], dtype=float)
+                print(f"[Warn] Missing: {data_path}")
+                if fill_missing_with_nan:
+                    for m in methods:
+                        data_out[(robot, env, m)] = np.array([np.nan], dtype=float)
                 continue
 
             npz = np.load(data_path, allow_pickle=True)
             results = npz["results"].item()
 
             for m in methods:
+                if m not in method_name_map:
+                    raise KeyError(f"Method '{m}' missing from method_name_map")
+
                 top_key, adapt_key = method_name_map[m]
 
+                # -------- Extract raw arrays + success mask --------
                 if top_key in ("rrtc", "library"):
-                    values = np.asarray(results[top_key][metric], dtype=float)
-                    if only_success:
-                        success = np.asarray(results[top_key]["success"], dtype=bool)
-                        values = values[success]
+                    values_raw = np.asarray(results[top_key][metric], dtype=float)
+                    success_raw = np.asarray(results[top_key]["success"], dtype=bool)
 
                 elif top_key == "adaptations":
-                    values = np.asarray(results["adaptations"][metric][adapt_key], dtype=float)
-                    if only_success:
-                        success = np.asarray(results["adaptations"]["success"][adapt_key], dtype=bool)
-                        values = values[success]
-                else:
-                    raise ValueError(top_key)
+                    if adapt_key is None:
+                        raise ValueError(f"Adaptation method '{m}' needs adapt_key, got None")
+                    values_raw = np.asarray(results["adaptations"][metric][adapt_key], dtype=float)
+                    success_raw = np.asarray(results["adaptations"]["success"][adapt_key], dtype=bool)
 
+                else:
+                    raise ValueError(f"Unknown top_key: {top_key}")
+
+                # -------- Sanity: arrays should align by index --------
+                if strict_align_assert:
+                    if values_raw.shape[0] != success_raw.shape[0]:
+                        raise ValueError(
+                            f"[{robot}-{env}-{m}] length mismatch: "
+                            f"{metric} has {values_raw.shape[0]} vs success has {success_raw.shape[0]}"
+                        )
+
+                # -------- Apply success mask first (key correction) --------
+                if only_success:
+                    mask = success_raw
+                else:
+                    mask = np.ones_like(success_raw, dtype=bool)
+
+                values = values_raw[mask]
+
+                # -------- Clean + convert units --------
                 values = values[np.isfinite(values)]
+
                 if metric == "times" and time_in_ms:
                     values = values * 1000.0
 
-                # ensure non-empty so boxplot doesn't choke
+                # Ensure non-empty so boxplot doesn't choke
                 if values.size == 0:
                     values = np.array([np.nan], dtype=float)
 
@@ -274,6 +377,6 @@ if __name__ == "__main__":
 
     # TODO replace this with real data
     #data = generate_fake_data(robots, envs, methods, n_problems=1000, seed=42)
-    data = prepare_data(robots, envs, methods, only_success=False)
+    data = prepare_data(robots, envs, methods, metric="lengths", only_success=True)
 
     plot_path_quality_boxplot(data, robots, envs, methods, save_name="quality")

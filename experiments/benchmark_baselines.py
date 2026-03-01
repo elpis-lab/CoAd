@@ -167,11 +167,14 @@ class Library():
         home_qpos,
         key_to_root,
         solved_keys,
+        task_paths,
         data
     ):
         """Build library"""
         self.key_to_root = key_to_root
-        self.indexer = BoxGrid(key_to_root)
+        self.task_paths = task_paths
+        #self.indexer = BoxGrid(key_to_root)
+        self.indexer = BoxGrid(task_paths)
         self.robot = robot
         
         if isinstance(env, ShelfEnv) and isinstance(robot, FetchArm):
@@ -185,33 +188,40 @@ class Library():
         solved_key_list = list(solved_keys)
 
         self.library = {}
-        print("Building library baseline")
-        pbar_library = tqdm(total=N)
+        pbar_library = tqdm(total=N, desc="Building library", leave=True)
 
+        iters = 0
         while len(self.library) <= N:
+            iters += 1
+            
             random_key = solved_key_list[np.random.randint(0, len(solved_key_list))]
-            sample = [] 
-            for lo, hi in random_key:
-                sample.append(np.random.uniform(lo, hi))
-            env.move_cube_object(sample)
+            sample = [np.random.uniform(lo, hi) for lo, hi in random_key]
+
             recovered_key = self.indexer.query_point(sample)
             if recovered_key is None:
-                input("Failed to find sample")
+                #print("Failed to find sample", flush=True)
                 continue
-            _, curr_goal = key_to_root[recovered_key]
-
-            path, total_time, planning_time = self.ompl_planner.plan(
-                start=home_qpos,
-                goal=curr_goal,
-                timeout=5.0,
-                num_waypoints=200,
-                benchmark=True,
-            )
+            #_, curr_goal = key_to_root[recovered_key]
+            path = task_paths[recovered_key]
             if path is None or len(path)==0:
+                #print("none path", flush=True)
                 continue
-            self.library[tuple(sample)] = (curr_goal, path)
-            pbar_library.update(1)
+            curr_goal = path[-1]
 
+            # path, total_time, planning_time = self.ompl_planner.plan(
+            #     start=home_qpos,
+            #     goal=curr_goal,
+            #     timeout=5.0,
+            #     num_waypoints=200,
+            #     benchmark=True,
+            # )
+            
+            if tuple(sample) not in self.library:
+                #print(tuple(sample))
+                self.library[tuple(sample)] = (curr_goal, path)
+                pbar_library.update(1)
+
+        
         self.lib_index = self.build_library_index(w_yaw=1.0)
         #return self.lib_index
 
@@ -443,7 +453,7 @@ class Library():
             if not rewired_any:
                 return out, True
 
-    def rewire_to_goal(self, path, goal, n_wps=20):
+    def rewire_to_goal(self, path, goal, n_wps=20, timeout=1.0):
         path = np.asarray(path, dtype=np.float64)
         T = len(path)
 
@@ -477,7 +487,7 @@ class Library():
             rewired_segment, _, _ = self.ompl_planner.plan(
                 start=q_start,
                 goal=q_goal,
-                timeout=2.0,
+                timeout=timeout,
                 num_waypoints=n_wps,
                 benchmark=True,
             )
@@ -500,15 +510,20 @@ class Library():
 
 
 
-    def solve(self, sample, k=5):
+    def solve(self, sample, k=5, timeout=3.0):
         nn_query_start = time.perf_counter()
         nn_results = self.query_library_nn(self.lib_index, sample, n=k)
         nn_query_end = time.perf_counter()
+        nn_time = nn_query_end - nn_query_start
 
         recovered_key = self.indexer.query_point(sample)
         if recovered_key is None:
-            raise RuntimeError("Failed to find key")
-        _, curr_goal = self.key_to_root[recovered_key]
+            #raise RuntimeError("Failed to find key")
+            return None, nn_time, False
+        #_, curr_goal = self.key_to_root[recovered_key]
+        path = self.task_paths[recovered_key]
+        curr_goal = path[-1]
+
 
         fix_start = time.perf_counter()
         fix_end = fix_start
@@ -517,39 +532,64 @@ class Library():
         success = False
 
         for neighbor_key, (neighbor_goal, neighbor_path), neighbor_dist in nn_results:
+
+            # ---- Check global timeout BEFORE heavy work ----
+            elapsed_fix = time.perf_counter() - fix_start
+            if elapsed_fix > timeout:
+                total_time = nn_time + elapsed_fix
+                return None, total_time, False
+
             # 1) collision map + buffer
             waypoints_valid = self.collision_buffer(
                 self.check_path_collision(neighbor_path),
                 b=0
             )
-            #print("Rewiring internal segments")
-            # 2) rewire internal segments (RRTConnect)
+
+            # ---- Remaining budget for this neighbor ----
+            remaining = timeout - (time.perf_counter() - fix_start)
+            if remaining <= 0:
+                total_time = nn_time + (time.perf_counter() - fix_start)
+                return None, total_time, False
+
+            # 2) rewire internal segments
             rewired_path, ok = self.rewire_segments(
                 neighbor_path,
                 waypoints_valid,
-                timeout=3.0,
+                timeout=min(2.0, remaining),   # cap by remaining budget
                 num_waypoints=20
             )
+
             if not ok or rewired_path is None:
                 continue
 
-            #print("Rewiring to goal")
-            # 3) rewire tail to the new goal (interp else RRTConnect)
-            candidate_path, ok = self.rewire_to_goal(rewired_path, curr_goal, n_wps=20)
+            # ---- Recompute remaining budget ----
+            remaining = timeout - (time.perf_counter() - fix_start)
+            if remaining <= 0:
+                total_time = nn_time + (time.perf_counter() - fix_start)
+                return None, total_time, False
+
+            # 3) rewire tail to goal
+            candidate_path, ok = self.rewire_to_goal(
+                rewired_path,
+                curr_goal,
+                n_wps=20,
+                timeout=min(1.0, remaining)   # cap by remaining budget
+            )
+
             if not ok or candidate_path is None:
                 continue
 
-            # success
             final_path = candidate_path
             success = True
-            fix_end = time.perf_counter()
             break
 
-        if not success:
-            fix_end = time.perf_counter()
-            return np.nan, (nn_query_end - nn_query_start) + (fix_end - fix_start), False
+        fix_end = time.perf_counter()
+        fix_time = fix_end - fix_start
+        total_time = nn_time + fix_time
 
-        total_time = (nn_query_end - nn_query_start) + (fix_end - fix_start)
+        if not success:
+            return None, total_time, False
+
         return final_path, total_time, True
 
     def wrap_pi(self, a):
@@ -647,8 +687,10 @@ def evaluate_graph(
 
     # Building library baseline with N = full library size
     N = len(solved_task_paths_keys)
-    library = Library(N, env, robot, home_qpos, key_to_roots[0], solved_keys, data)
+    print("\n=== Building library ===")
+    library = Library(N, env, robot, home_qpos, key_to_roots[0], solved_keys, task_paths, data)
 
+    print("\n=== Evaluating baselines ===")
     pbar = tqdm(enumerate(solved_keys), total=len(solved_keys))
     for i, key in enumerate(solved_keys):
         
@@ -697,8 +739,8 @@ def evaluate_graph(
             num_waypoints=200,
             benchmark=True,
         )
-        if path is None:
-            print(f"Planning failure for key: {key}")
+        if path is None or len(path)==0:
+            #print(f"Planning failure for key: {key}")
             rrtc_success.append(False)
             rrtc_lengths.append(np.nan)
         else:
@@ -711,8 +753,12 @@ def evaluate_graph(
         library_path, library_time, lib_query_success = library.solve(sample)
 
         library_success.append(lib_query_success)
-        library_lengths.append(traj_len(library_path))
         library_times.append(library_time)
+        
+        if lib_query_success is True:
+            library_lengths.append(traj_len(library_path))
+        else:
+            library_lengths.append(np.nan)
 
         pbar.update(1)
 
