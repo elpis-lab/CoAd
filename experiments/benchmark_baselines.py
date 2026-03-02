@@ -602,7 +602,8 @@ def evaluate_graph(
     folder,
     task_set,
     task_paths,
-    adaptations
+    adaptations,
+    num_samples
 ):
     model, data = robot.model, robot.data
     home_qpos = robot.get_joint_qpos()
@@ -690,18 +691,25 @@ def evaluate_graph(
     print("\n=== Building library ===")
     library = Library(N, env, robot, home_qpos, key_to_roots[0], solved_keys, task_paths, data)
 
-    print("\n=== Evaluating baselines ===")
-    pbar = tqdm(enumerate(solved_keys), total=len(solved_keys))
-    for i, key in enumerate(solved_keys):
-        
+    print(f"\n=== Evaluating baselines over {num_samples} samples===")
+    num_tested = 0
+    
+    #pbar = tqdm(enumerate(solved_keys), total=len(solved_keys))
+    #for i, key in enumerate(solved_keys):
+    pbar = tqdm(range(num_samples), total=num_samples)
+    while (num_tested < num_samples):
+
+        key_ind = np.random.randint(0, len(solved_keys))
+        key = solved_keys[key_ind]
+
         sample = [] 
         for lo, hi in key:
             x = np.random.uniform(lo, hi)
-            #x = np.nextafter(x, lo)
+            x = np.nextafter(x, lo)
             sample.append(x)
 
         env.move_cube_object(sample)
-        recovered_key = indexers[1].query_point(sample)  # pick one
+        recovered_key = indexers[0].query_point(sample)  # pick one
         _, key_goal = key_to_roots[0][recovered_key]
 
         for adaptation_ind, adaptation in enumerate(adaptations):
@@ -736,6 +744,7 @@ def evaluate_graph(
             start=home_qpos,
             goal=key_goal,
             timeout=3.0,
+            smooth_path=False,
             num_waypoints=200,
             benchmark=True,
         )
@@ -760,6 +769,7 @@ def evaluate_graph(
         else:
             library_lengths.append(np.nan)
 
+        num_tested += 1
         pbar.update(1)
 
     rrtc_success = np.array(rrtc_success)
@@ -969,10 +979,11 @@ def main(args):
     # print(f"Number of generated tasks: {len(task_set_data)}")
     # print(f"Number of solved IK: {len(joint_goal_set_data)}")
 
-    planning_results_path = f"{folder}/task_paths_results_neighbor_RRTConnect.npy"
-    planning_results = np.load(planning_results_path)
+    #planning_results_path = f"{folder}/task_paths_results_neighbor_RRTConnect.npy"
+    #planning_results = np.load(planning_results_path)
 
-    evaluate_graph(args, env, robot, folder, task_set, task_paths, adaptations_found)
+    num_samples = 1000
+    evaluate_graph(args, env, robot, folder, task_set, task_paths, adaptations_found, num_samples)
 
 
 def parse_arguments():
