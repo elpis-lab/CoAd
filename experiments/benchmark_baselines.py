@@ -710,7 +710,8 @@ def evaluate_graph(
 
         env.move_cube_object(sample)
         recovered_key = indexers[0].query_point(sample)  # pick one
-        _, key_goal = key_to_roots[0][recovered_key]
+        #_, key_goal = key_to_roots[0][recovered_key]
+        key_goal = solved_task_paths[recovered_key][-1]
 
         for adaptation_ind, adaptation in enumerate(adaptations):
             adapt_start = time.perf_counter()
