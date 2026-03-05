@@ -1008,7 +1008,11 @@ class RealEnv(MujocoEnv):
         sv_config = super().initialize_TSR_parameters(robot, grasp_strategy="top")
 
         #print(self.object_details['size'])
-        sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config, cyl=True)
+        if no_sv is True:
+            pass
+            
+        else:
+            sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config, cyl=True)
         #sv_xml = self.mjcf_file_to_fragment(object_path)
         xmls_to_add = [sv_xml]
         
