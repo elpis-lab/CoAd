@@ -781,43 +781,25 @@ def evaluate_graph(
     library_times = np.array(library_times)
     library_lengths = np.array(library_lengths)
 
-    mean_rrtc_time = np.nanmean(rrtc_times)
-    mean_library_time = np.nanmean(library_times)
-    #mean_adaptation_time = np.nanmean(adaptation_times)
-    #mean_root_time = np.nanmean(find_root_times)
-    #mean_query_time = np.nanmean(query_times)
-
-    mean_rrtc_length = np.nanmean(rrtc_lengths)
-    mean_library_length = np.nanmean(library_lengths)
-
     rrtc_success_rate = np.mean(rrtc_success)*100
     library_success_rate = np.mean(library_success)*100
-    #adaptation_success_rate = np.mean(adaptation_success)*100
+    
+    rrtc_times_succ = rrtc_times[rrtc_success]
+    library_times_succ = library_times[library_success]
 
     # ---- RRTConnect ----
-    mean_rrtc_time_ms = np.nanmean(rrtc_times) * 1000
-    std_rrtc_time_ms  = np.nanstd(rrtc_times, ddof=1) * 1000
-
+    mean_rrtc_time_ms = np.nanmean(rrtc_times_succ) * 1000
+    std_rrtc_time_ms  = np.nanstd(rrtc_times_succ, ddof=1) * 1000
+    
     mean_rrtc_length = np.nanmean(rrtc_lengths)
     std_rrtc_length  = np.nanstd(rrtc_lengths, ddof=1)
 
     # ---- Library baseline ----
-    mean_library_time_ms = np.nanmean(library_times) * 1000
-    std_library_time_ms  = np.nanstd(library_times, ddof=1) * 1000
+    mean_library_time_ms = np.nanmean(library_times_succ) * 1000
+    std_library_time_ms  = np.nanstd(library_times_succ, ddof=1) * 1000
 
     mean_library_length = np.nanmean(library_lengths)
     std_library_length  = np.nanstd(library_lengths, ddof=1)
-
-
-    # print("\n=== RRTConnect results ===")
-    # print(f"RRTConnect success rate: {rrtc_success_rate}%")
-    # print(f"Mean RRTConnect time: {mean_rrtc_time}")
-    # print(f"Mean RRTConnect length: {mean_rrtc_length}")
-
-    # print("\n=== Library baseline results ===")
-    # print(f"Library success rate: {library_success_rate}%")
-    # print(f"Mean library time: {mean_library_time}")
-    # print(f"Mean library length: {mean_library_length}")
 
     print("\n=== RRTConnect results ===")
     print(f"RRTConnect success rate: {rrtc_success_rate:.2f}%")
@@ -832,11 +814,19 @@ def evaluate_graph(
 
     for adaptation in adaptations:
 
-        times = adaptation_times[adaptation]
+        times = np.asarray(adaptation_times[adaptation], dtype=float)
+        succ  = np.asarray(adaptation_success[adaptation], dtype=bool)
+
+        times_succ = times[succ]
+
+        mean_time_ms = np.nanmean(times_succ) * 1000
+        std_time_ms  = np.nanstd(times_succ, ddof=1) * 1000
+
+        #times = adaptation_times[adaptation]
         lengths = adaptation_lengths[adaptation]
 
-        mean_time_ms = np.nanmean(times) * 1000
-        std_time_ms  = np.nanstd(times, ddof=1) * 1000
+        #mean_time_ms = np.nanmean(times) * 1000
+        #std_time_ms  = np.nanstd(times, ddof=1) * 1000
 
         mean_length = np.nanmean(lengths)
         std_length  = np.nanstd(lengths, ddof=1)
