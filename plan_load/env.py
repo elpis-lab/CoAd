@@ -312,6 +312,40 @@ class MujocoEnv:
         """
         return obj_xml
     
+    def cylinder_object_xml(self, object_dims, object_pose, fixed=False):
+        """Create cylinder object xml string"""
+
+        rgba = [0.8, 0.2, 0.2, 1]
+        name = "cube_object"
+
+        r, h = object_dims
+
+        object_x, object_y, object_z, object_yaw = object_pose
+
+        half = 0.5 * float(object_yaw)
+        qw = np.cos(half)
+        qx = 0.0
+        qy = 0.0
+        qz = np.sin(half)
+
+        joint_xml = "" if fixed else f'<joint name="{name}_free" type="free"/>'
+
+        obj_xml = f"""
+        <body name="{name}"
+            pos="{object_x} {object_y} {object_z}"
+            quat="{qw} {qx} {qy} {qz}">
+            {joint_xml}
+
+            <geom name="{name}_geom"
+                type="cylinder"
+                pos="0 0 0"
+                size="{r} {h/2}"
+                rgba="{rgba[0]} {rgba[1]} {rgba[2]} {rgba[3]}"/>
+        </body>
+        """
+
+        return obj_xml
+    
     def move_cube_object(self, object_pose):
         """
         Move cube_object to (x, y, z, yaw) by writing into its free joint qpos.
@@ -1009,8 +1043,10 @@ class RealEnv(MujocoEnv):
 
         #print(self.object_details['size'])
         if no_sv is True:
-            pass
-            
+            #pass
+            #print(self.object_details['size'])
+            #print(sv_config)
+            sv_xml = super().cylinder_object_xml(self.object_details['size'], [1, 1, 0, 0])
         else:
             sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config, cyl=True)
         #sv_xml = self.mjcf_file_to_fragment(object_path)
@@ -1037,14 +1073,15 @@ class RealEnv(MujocoEnv):
         # g_cups_xml = self.mjcf_file_to_fragment("assets/ycb/g_cups.xml")
         # xmls_to_add.append(g_cups_xml)
 
-        
+        wall1_dims = (0.24, 0.45, 0.29)
+        wall1_dims = np.array(wall1_dims)*1.1        
 
         # build wall 1
         wall_1_xml = self.build_primitive_body_xml(
             body_name="wall1",
             prim_type="box",
             pos=(0.32, -0.82, 0.145),
-            dims=(0.24, 0.45, 0.29),
+            dims=wall1_dims.tolist(),
             quat_xyzw=(0, 0, 0, 1),
             make_free=False,
         )
@@ -1365,8 +1402,8 @@ if __name__=="__main__":
         env = FreeEnv(robot_chosen, no_sv=True)
 
     model, data = env.model, env.data
-    task_set = env.generate_task_set()
-    env.move_cube_object([-env.object_outer_rad, -env.object_outer_rad, env.object_details['position'][2], 0])    
+    #task_set = env.generate_task_set()
+    #env.move_cube_object([-env.object_outer_rad, -env.object_outer_rad, env.object_details['position'][2], 0])    
 
     folder = f"data/{environment}_{robot_chosen}"
     # task_set = pickle.load(open(f"{folder}/task_set.pkl", "rb"))
