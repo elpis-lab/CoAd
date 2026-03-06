@@ -22,7 +22,7 @@ def condense_dataset(
     robot: MujocoRobot,
     task_paths,
     adaptation,
-    n_neighbors=1000,
+    n_neighbors=100,
 ):
     """
     Condense a dataset of joint-space paths by greedily picking root paths
@@ -90,6 +90,51 @@ def condense_dataset(
             robot.viewer.sync()
         pbar.update(1)
 
+        # # DEBUG
+        # def visualize_path(path):
+        #     for q in path:
+        #         robot.set_joint_qpos(q)
+        #         robot.viewer.sync()
+        #         time.sleep(0.005)
+
+        # input("PATH1")
+        # # visualize_path(center_path)
+        # input("PATH2")
+        # center_path2 = adapter.adapt(adapted_center, q_end - 0.3)
+        # print(center_path2.shape)
+        # # center_path2[:, -1] = 0
+        # # valid = adapter.path_validity_check(center_path2)
+        # # print(valid)
+        # print(adapted_center.start)
+        # print(q_end)
+        # print(len(center_path))
+        # print(len(center_path2))
+        # print(center_path[:20, 0])
+        # print(center_path2[:20, 0])
+        # visualize_path(center_path2)
+        # # Plot 7 figures to compare center path and center path 2
+        # import matplotlib.pyplot as plt
+
+        # fig, axs = plt.subplots(7, 1)
+        # for i in range(7):
+        #     axs[i].plot(center_path[:, i])
+        #     axs[i].plot(center_path2[:, i])
+        #     axs[i].legend(["center path", "center path2"])
+        #     axs[i].set_title(f"Joint {i}")
+        #     axs[i].set_xlabel("Time")
+        #     axs[i].set_ylabel("Joint Position")
+        # plt.show()
+        # if not valid:
+        #     for i in range(len(center_path2) - 1):
+        #         q1 = center_path2[i]
+        #         q2 = center_path2[i + 1]
+        #         if not adapter.segment_validity_check(q1, q2):
+        #             input("INVALID")
+        #             robot.set_joint_qpos(q1)
+        #             robot.viewer.sync()
+        #             input("INVALID")
+        # input("DONE")
+
         # Query nearest neighbors and
         # Consider those that are still in remaining
         key_arr = np.array(center_key)
@@ -114,6 +159,16 @@ def condense_dataset(
             t0 = time.perf_counter()
             valid, q_nb_end = adapter.compress(adapted_center, nb_path)
             t1 = time.perf_counter()
+
+            # input(f"NEIGHBOR PATH {valid}")
+            # adapted_nb = adapter.adapt(adapted_center, q_nb_end)
+            # visualize_path(adapted_nb)
+            # for i in range(7):
+            #     axs[i].plot(center_path[:, i])
+            #     axs[i].plot(adapted_nb[:, i])
+            #     axs[i].legend(["center path", "center path2"])
+            # plt.show()
+
             if not valid:
                 continue
 
@@ -131,7 +186,10 @@ def condense_dataset(
         # Update tqdm message periodically
         print_interval = 50
         if len(root_paths) % print_interval == 0:
-            tqdm.write(f"[{len(root_paths)}] ")
+            tqdm.write(
+                f"\nNumber of root paths:{len(root_paths)}."
+                + f"\nNumber of completed tasks:{pbar.total - len(remaining)}."
+            )
 
     print("Condensation complete.")
     print(f"Number of root paths: {len(root_paths)}")
@@ -162,7 +220,7 @@ def main(args):
         return
 
     # Load environment and robot
-    env, robot = load_env_and_robot(args.env, args.robot)
+    env, robot = load_env_and_robot(args.env, args.robot, True)
 
     # Solve problems
     # Load the joint space problem set
@@ -215,7 +273,7 @@ def parse_arguments():
     parser.add_argument(
         "--adaptation", choices=["linear", "grr", "dmp", "opt"], default="grr"
     )
-    parser.add_argument("--n_neighbors", type=int, default=1000)
+    parser.add_argument("--n_neighbors", type=int, default=100)
 
     args = parser.parse_args()
     return args

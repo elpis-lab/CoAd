@@ -8,6 +8,8 @@ https://ieeexplore.ieee.org/document/6797340
 
 Implementation from pydmps:
 https://github.com/studywolf/pydmps?tab=readme-ov-file
+
+Modified to improve efficiency and stability
 """
 
 import numpy as np
@@ -40,7 +42,8 @@ class CanonicalSystem:
             )
 
         self.dt = dt
-        self.timesteps = int(self.run_time / self.dt)
+        # Include start
+        self.timesteps = int(round(self.run_time / self.dt)) + 1
 
         self.reset_state()
 
@@ -53,7 +56,10 @@ class CanonicalSystem:
         self.x_track = np.zeros(timesteps)
 
         self.reset_state()
-        for t in range(timesteps):
+
+        # Include start
+        self.x_track[0] = self.x
+        for t in range(1, timesteps):
             self.x_track[t] = self.x
             self.step(**kwargs)
 
@@ -134,7 +140,7 @@ class DMP(object):
 
         # set up the CS
         self.cs = CanonicalSystem(dt=self.dt, **kwargs)
-        self.timesteps = int(self.cs.run_time / self.dt)
+        self.timesteps = self.cs.timesteps
 
         # set up the DMP system
         self.reset_state()
@@ -231,27 +237,113 @@ class DMP(object):
         self.reset_state()
         return y_des
 
-    def rollout(self, timesteps=None, **kwargs):
-        """Generate a system trial, no feedback is incorporated."""
+    # Original rollout
+    # def rollout(self, timesteps=None, **kwargs):
+    #     """Generate a system trial, no feedback is incorporated."""
 
+    #     self.reset_state()
+
+    #     if timesteps is None:
+    #         if "tau" in kwargs:
+    #             timesteps = int(self.timesteps / kwargs["tau"])
+    #         else:
+    #             timesteps = self.timesteps
+
+    #     # set up tracking vectors
+    #     y_track = np.zeros((timesteps, self.n_dmps))
+    #     dy_track = np.zeros((timesteps, self.n_dmps))
+    #     ddy_track = np.zeros((timesteps, self.n_dmps))
+
+    #     # FIX
+    #     # record initial state
+    #     y_track[0] = self.y.copy()
+    #     dy_track[0] = self.dy.copy()
+    #     ddy_track[0] = self.ddy.copy()
+    #     for t in range(1, timesteps):
+
+    #         # run and record timestep
+    #         y_track[t], dy_track[t], ddy_track[t] = self.step(**kwargs)
+
+    #     return y_track, dy_track, ddy_track
+
+    def rollout(self, timesteps=None, **kwargs):
+        """Fast open-loop rollout for discrete DMPs."""
         self.reset_state()
 
+        # Hanlde residual fitting
+        if "residual" in kwargs:
+            residual = kwargs["residual"]
+        else:
+            residual = False
+
+        if "tau" in kwargs:
+            tau = kwargs["tau"]
+        else:
+            tau = 1.0
         if timesteps is None:
-            if "tau" in kwargs:
-                timesteps = int(self.timesteps / kwargs["tau"])
-            else:
-                timesteps = self.timesteps
+            timesteps = (
+                int(self.timesteps / tau) if tau != 1.0 else self.timesteps
+            )
 
-        # set up tracking vectors
-        y_track = np.zeros((timesteps, self.n_dmps))
-        dy_track = np.zeros((timesteps, self.n_dmps))
-        ddy_track = np.zeros((timesteps, self.n_dmps))
+        # T = timesteps
+        # D = self.n_dmps
 
-        for t in range(timesteps):
+        # Precompute canonical system x(t) by stepping once
+        x_track = np.empty(timesteps, dtype=float)
+        x = 1.0
+        x_track[0] = x
+        ax_dt_tau = self.cs.ax * self.dt * tau  # constant for open loop
+        for t in range(1, timesteps):
+            x = x + (-ax_dt_tau) * x  # error_coupling=1
+            x_track[t] = x
 
-            # run and record timestep
-            y_track[t], dy_track[t], ddy_track[t] = self.step(**kwargs)
+        # Precompute psi, normalized psi, and f_hat(t,d)
+        # ensure h and c are 1D arrays shape (B,)
+        diff = x_track[:, None] - self.c[None, :]
+        psi = np.exp(-self.h[None, :] * diff * diff)
 
+        # normalized basis times x(psi / sumpsi) * x
+        psi_sum = np.sum(psi, axis=1, keepdims=True) + 1e-12
+        phi = (psi / psi_sum) * x_track[:, None]  # (T, B)
+
+        # f_hat: (T, D) = phi @ w.T (equals (psi@w.T)/sumpsi * x)
+        f_hat = phi @ self.w.T  # (T, D)
+
+        # front term for discrete: x*(goal - y0), vectorized over D
+        k = self.goal - self.y0  # (D,)
+        if residual:
+            k = np.where(np.abs(k) < 1e-6, 1.0, k)
+
+        # Outputs
+        y_track = np.empty((timesteps, self.n_dmps), dtype=float)
+        dy_track = np.empty((timesteps, self.n_dmps), dtype=float)
+        ddy_track = np.empty((timesteps, self.n_dmps), dtype=float)
+
+        # initial
+        y = self.y.copy()
+        dy = self.dy.copy()
+        y_track[0] = y
+        dy_track[0] = dy
+        ddy_track[0] = 0.0
+
+        # loops over time, but vectorized over D
+        ay = self.ay
+        by = self.by
+        dt_tau = self.dt * tau
+        for t in range(1, timesteps):
+            # forcing term: front * (psi·w/sumpsi)
+            # f_hat already includes x and normalization
+            f = k * f_hat[t]  # (D,)
+
+            ddy = ay * (by * (self.goal - y) - dy) + f
+            dy = dy + ddy * dt_tau
+            y = y + dy * dt_tau
+            y_track[t] = y
+            dy_track[t] = dy
+            ddy_track[t] = ddy
+
+        # write back state
+        self.y, self.dy, self.ddy = y, dy, ddy
         return y_track, dy_track, ddy_track
 
     def reset_state(self):
@@ -268,10 +360,10 @@ class DMP(object):
                    increase tau to make the system execute faster
         error float: optional system feedback
         """
-
         error_coupling = 1.0 / (1.0 + error)
-        # run canonical system
-        x = self.cs.step(tau=tau, error_coupling=error_coupling)
+
+        # Run canonical system later
+        x = self.cs.x
 
         # generate basis function activation
         psi = self.gen_psi(x)
@@ -294,6 +386,9 @@ class DMP(object):
                 self.ddy[d] += external_force[d]
             self.dy[d] += self.ddy[d] * tau * self.dt * error_coupling
             self.y[d] += self.dy[d] * tau * self.dt * error_coupling
+
+        # run canonical system
+        x = self.cs.step(tau=tau, error_coupling=error_coupling)
 
         return self.y, self.dy, self.ddy
 
@@ -372,22 +467,42 @@ class DMPDiscete(DMP):
 
         f_target np.array: the desired forcing term trajectory
         """
+        # Per-basis Implementation
+        # # calculate x and psi
+        # x_track = self.cs.rollout()
+        # psi_track = self.gen_psi(x_track)
 
-        # calculate x and psi
+        # # efficiently calculate BF weights using weighted linear regression
+        # self.w = np.zeros((self.n_dmps, self.n_bfs))
+        # for d in range(self.n_dmps):
+        #     # spatial scaling term
+        #     k = self.goal[d] - self.y0[d]
+        #     for b in range(self.n_bfs):
+        #         numer = np.sum(x_track * psi_track[:, b] * f_target[:, d])
+        #         denom = np.sum(x_track**2 * psi_track[:, b]) + 1e-9
+        #         self.w[d, b] = numer / denom
+        #         if abs(k) > 1e-5:
+        #             self.w[d, b] /= k
+
+        # Solve weights with ridge least squares
         x_track = self.cs.rollout()
-        psi_track = self.gen_psi(x_track)
+        psi = self.gen_psi(x_track)  # (T, B)
+        psi_sum = np.sum(psi, axis=1, keepdims=True) + 1e-12
 
-        # efficiently calculate BF weights using weighted linear regression
-        self.w = np.zeros((self.n_dmps, self.n_bfs))
+        # features: (T, B)
+        phi = (psi / psi_sum) * x_track[:, None]
+
         for d in range(self.n_dmps):
-            # spatial scaling term
             k = self.goal[d] - self.y0[d]
-            for b in range(self.n_bfs):
-                numer = np.sum(x_track * psi_track[:, b] * f_target[:, d])
-                denom = np.sum(x_track**2 * psi_track[:, b])
-                self.w[d, b] = numer / denom
-                if abs(k) > 1e-5:
-                    self.w[d, b] /= k
+            y = f_target[:, d]
+            if abs(k) > 1e-6:
+                y = y / k
+
+            # ridge
+            lam = 1e-6
+            a = phi.T @ phi + lam * np.eye(self.n_bfs)
+            b = phi.T @ y
+            self.w[d] = np.linalg.solve(a, b)
 
         self.w = np.nan_to_num(self.w)
 

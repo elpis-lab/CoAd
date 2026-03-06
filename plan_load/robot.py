@@ -79,9 +79,10 @@ class MujocoRobot:
 
     def in_contact(self, verbose=False):
         """Check if the robot is in contact with the environment"""
-        return geoms_in_contact(
-            self.model, self.data, self.robot_geoms, verbose
+        in_contact = geoms_in_contact(
+            self.model, self.data, self.robot_geoms, 1e-3, verbose
         )
+        return in_contact
 
     def get_robot_geoms(self, geom_group):
         """Get robot geoms"""
