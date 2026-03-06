@@ -644,7 +644,10 @@ def evaluate_graph(
         adaptation_times[f"{adaptation}"] = []
         adaptation_lengths[f"{adaptation}"] = []
 
-        suffix = f"{args.ik}_{args.planner}_{adaptation}_{args.n_neighbors}"
+        if adaptation == 'dmp' and args.env=="real" and args.robot == "ur10":
+            suffix = f"{args.ik}_{args.planner}_{adaptation}_100"
+        else:
+            suffix = f"{args.ik}_{args.planner}_{adaptation}_{args.n_neighbors}"
         root_path = f"{folder}/root_paths_{suffix}.pkl"
         map_path = f"{folder}/key_to_root_{suffix}.pkl"
         
