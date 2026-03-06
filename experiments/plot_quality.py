@@ -186,7 +186,9 @@ def plot_path_quality_boxplot(
 ):
     """Draw the boxplot of path quality (lengths or times)"""
 
-    sections = [(r, e) for r in robots for e in envs]
+    #sections = [(r, e) for r in robots for e in envs]
+    sections = [(r, e) for r in ["panda", "fetch"] for e in ["table", "cage", "shelf"]]
+    sections.append(("ur10", "real"))
     n_methods = len(methods)
 
     gap = 2.5
@@ -205,7 +207,10 @@ def plot_path_quality_boxplot(
             pos += within
         end = pos - within
         section_centers.append((start + end) / 2.0)
-        section_labels.append(f"{r} - {e}")
+        if r == "ur10":
+            section_labels.append(f"{r.upper()} - {e.capitalize()}")    
+        else:
+            section_labels.append(f"{r.capitalize()} - {e.capitalize()}")
         pos += gap
 
     # Text sizing
@@ -602,8 +607,8 @@ def print_experiment_stats(
                 )
                 
 if __name__ == "__main__":
-    robots = ["UR10", "Fetch"]
-    envs = ["Table", "Cage", "Shelf"]
+    #robots = ["Panda", "Fetch", "UR10"]
+    #envs = ["Table", "Cage", "Shelf", "Real"]
     methods = [
         "RRT-Connect",
         "Library",
@@ -613,8 +618,8 @@ if __name__ == "__main__":
         "LOAD-TrajOpt",
     ]
 
-    robots = ["panda", "fetch"]
-    envs = ["table", "cage", "shelf"]
+    robots = ["panda", "fetch", "ur10"]
+    envs = ["table", "cage", "shelf", "real"]
 
     # Print stats first
     print_experiment_stats(robots, envs, methods, only_success=True, time_in_ms=True)
