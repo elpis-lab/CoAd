@@ -420,8 +420,8 @@ def prepare_data(
     default_method_name_map = {
         "RRT-Connect": ("rrtc", None),
         "Library": ("library", None),
-        "LOAD-Interpolation": ("adaptations", "grr"),
-        "LOAD-TrajOpt": ("adaptations", "opt"),
+        "LOAD-LI": ("adaptations", "grr"),
+        "LOAD-STO": ("adaptations", "opt"),
         "LOAD-DMP": ("adaptations", "dmp"),
     }
     if method_name_map is None:
@@ -527,8 +527,8 @@ def print_experiment_stats(
     default_method_name_map = {
         "RRT-Connect": ("rrtc", None),
         "Library": ("library", None),
-        "LOAD-Interpolation": ("adaptations", "grr"),
-        "LOAD-TrajOpt": ("adaptations", "opt"),
+        "LOAD-LI": ("adaptations", "grr"),
+        "LOAD-STO": ("adaptations", "opt"),
         "LOAD-DMP": ("adaptations", "dmp"),
     }
 
@@ -613,9 +613,9 @@ if __name__ == "__main__":
         "RRT-Connect",
         "Library",
         #"TrajOpt",
-        "LOAD-Interpolation",
+        "LOAD-LI",
         "LOAD-DMP",
-        "LOAD-TrajOpt",
+        "LOAD-STO",
     ]
 
     robots = ["panda", "fetch", "ur10"]
