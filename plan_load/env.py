@@ -1074,7 +1074,9 @@ class RealEnv(MujocoEnv):
         # xmls_to_add.append(g_cups_xml)
 
         wall1_dims = (0.24, 0.45, 0.29)
-        wall1_dims = np.array(wall1_dims)*1.1        
+        wall_inflation = 0.07 # inflating by object's size (for return path)
+        wall1_dims = np.array(wall1_dims)*1.05        
+        wall1_dims = wall1_dims + wall_inflation/2
 
         # build wall 1
         wall_1_xml = self.build_primitive_body_xml(
@@ -1182,7 +1184,7 @@ class RealEnv(MujocoEnv):
         upper_boundary_xml = self.build_primitive_body_xml(
             body_name="ub1",
             prim_type="box",
-            pos=(0, -0.50, 1.1),
+            pos=(0, -0.50, 1.02),
             dims=(1.5, 1.5, 0.02),
             quat_xyzw=(0, 0, 0, 1),
             make_free=False,
