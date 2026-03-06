@@ -231,7 +231,7 @@ def parse_arguments():
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument(
         "--env",
-        choices=["table", "box", "cage", "shelf", "free"],
+        choices=["table", "box", "cage", "shelf", "free", "real"],
         default="table",
     )
     parser.add_argument(

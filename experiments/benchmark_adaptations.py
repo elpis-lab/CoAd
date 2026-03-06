@@ -21,7 +21,7 @@ from experiments.evaluate import traj_len
 from plan_load.utils import set_seed, load_env_and_robot, get_data_folder
 from plan_load.planning import OMPLPlanner, euclidean_path_length
 
-from plan_load.env import FreeEnv, CageEnv, BoxEnv, TableEnv, ShelfEnv
+from plan_load.env import FreeEnv, CageEnv, BoxEnv, TableEnv, ShelfEnv, RealEnv
 from plan_load.robot import Panda, UR10, FetchArm
 
 
@@ -414,6 +414,8 @@ def main(args):
         env = ShelfEnv(robot_name, no_sv=True)
     elif env_name == "free":
         env = FreeEnv(robot_name, no_sv=True)
+    elif env_name == "real":
+        env = RealEnv(robot_name, no_sv=True)
     else:
         raise ValueError(f"Invalid environment: {env_name}")
 
@@ -444,7 +446,7 @@ def parse_arguments():
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument(
         "--env",
-        choices=["table", "box", "cage", "shelf", "free"],
+        choices=["table", "box", "cage", "shelf", "free", "real"],
         default="table",
     )
     parser.add_argument(
