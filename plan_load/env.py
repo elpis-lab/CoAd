@@ -1128,6 +1128,7 @@ class RealEnv(MujocoEnv):
 
         t_wall = 0.02
         h_wall = 0.13  # <-- change this to how tall you want the hollow box
+        h_wall = 0.13 + wall_inflation
 
         z_top = z_floor + t_floor / 2.0
         z_wall = z_top + h_wall / 2.0

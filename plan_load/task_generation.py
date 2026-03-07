@@ -533,7 +533,7 @@ def ur10_TSR_parameters(object_details, yaw_buffer, alpha):
     # Top TSR params
 
     # Panda specifications
-    ee_z_offset = -0.02
+    ee_z_offset = -0.04
     # ee_z_offset = 0
     s_f = 0.05
 
