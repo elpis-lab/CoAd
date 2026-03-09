@@ -262,7 +262,7 @@ def parse_arguments():
     # envs
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument(
-        "--env", choices=["table", "box", "cage", "shelf", "free"], default="table"
+        "--env", choices=["table", "box", "cage", "shelf", "free", "real"], default="table"
     )
     parser.add_argument(
         "--robot", choices=["panda", "ur10", "fetch"], default="panda"

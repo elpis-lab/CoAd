@@ -171,28 +171,53 @@ class DMPAdapter(Adapter):
         """
         Fit a discrete DMP per joint to center_path (T, n_joints).
         Return (center_obj, center_goal).
+
+        To avoid issues of force being too large
+        when start and goal are too close,
+        We instead fit DMP on the residual minus a traight line trend
         """
         center_path = np.asarray(center_path)
-        timesteps, n_joints = center_path.shape
+        steps, n_joints = center_path.shape
 
+        # dmp = DMPDiscete(
+        #     n_dmps=n_joints,
+        #     n_bfs=self.n_bfs,
+        #     dt=1 / (steps - 1),
+        #     ay=None if self.ay is None else self.ay * np.ones(n_joints),
+        #     by=None if self.by is None else self.by * np.ones(n_joints),
+        # )
+        # # expects y_des with shape (n_dmps, T)
+        # y_des = center_path.T
+        # dmp.imitate_path(y_des=y_des)
+
+        # # DMP "center"
+        # start = center_path[0].copy()
+        # goal = center_path[-1].copy()
+        # center = DMPCenter(dmp, start, goal, steps)
+        # return center, goal
+
+        y0 = center_path[0].copy()
+        g = center_path[-1].copy()
+
+        # linear trend
+        s = np.linspace(0.0, 1.0, steps)[:, None]  # (steps, 1)
+        line = y0[None, :] + s * (g - y0)[None, :]  # (steps, n_joints)
+        # residual
+        res = center_path - line  # (steps, n_joints)
+
+        # train DMP on residuals, with y0=0, goal=0
         dmp = DMPDiscete(
             n_dmps=n_joints,
             n_bfs=self.n_bfs,
-            dt=1 / len(center_path),
-            ay=self.ay,
-            by=self.by,
+            dt=1 / (steps - 1),
+            ay=None if self.ay is None else self.ay * np.ones(n_joints),
+            by=None if self.by is None else self.by * np.ones(n_joints),
         )
-        # expects y_des with shape (n_dmps, T)
-        y_des = center_path.T
-        dmp.imitate_path(y_des=y_des)
+        dmp.imitate_path(y_des=res.T)  # shape (D, T)
 
-        # DMP "center"
-        start = center_path[0].copy()
-        goal = center_path[-1].copy()
-        center = DMPCenter(
-            dmp=dmp, start=start, goal=goal, timesteps=timesteps
-        )
-        return center, goal
+        # store y0, goal and dmp
+        center = DMPCenter(dmp=dmp, start=y0, goal=g, timesteps=steps)
+        return center, g
 
     def compress(self, center: DMPCenter, nb_path, goal_refinement=True):
         """
@@ -220,18 +245,35 @@ class DMPAdapter(Adapter):
         return True, q_goal
 
     def adapt(self, center: DMPCenter, q_goal: np.ndarray) -> np.ndarray:
-        """Get a full joint-space trajectory from center.y0 to q_goal."""
+        """
+        Get a full joint-space trajectory from center.y0 to q_goal.
+        Similar as in the build_center method, we fit a DMP on the residual
+        """
         q_goal = np.asarray(q_goal)
+        n_joints = len(q_goal)
 
         # Get DMP instance
         dmp = center.dmp
+        steps = center.timesteps
         # Set start and goal
         dmp.y0 = center.start.copy()
         dmp.goal = q_goal.copy()
 
-        # Rollout the DMP
-        y_track, _, _ = dmp.rollout(timesteps=center.timesteps)
-        y_track = np.asarray(y_track)
+        # # Rollout the DMP
+        # y_track, _, _ = dmp.rollout(timesteps=center.timesteps)
+        # return y_track
+
+        # rollout residual with fixed endpoints
+        dmp.y0 = np.zeros(n_joints)
+        dmp.goal = np.zeros(n_joints)
+        res_track, _, _ = dmp.rollout(timesteps=steps, residual=True)
+
+        # line to the new goal
+        s = np.linspace(0.0, 1.0, steps)[:, None]
+        line_new = center.start[None, :] + s * (q_goal - center.start)[None, :]
+
+        # add the line to the residual to get the full path
+        y_track = line_new + res_track
         return y_track
 
 

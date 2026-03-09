@@ -526,28 +526,36 @@ def fetch_TSR_parameters(object_details, yaw_buffer, alpha):
     return TSR_params
 
 def ur10_TSR_parameters(object_details, yaw_buffer, alpha):
-    object_position = object_details["position"]
+    #object_position = object_details["position"]
     object_size = object_details["size"]
     object_dist = object_details["dist"]
     TSR_params = {}
     # Top TSR params
 
     # Panda specifications
-    ee_z_offset = -0.02
+    ee_z_offset = -0.04
     # ee_z_offset = 0
     s_f = 0.05
 
     Tew = np.eye(4)
     Tew[1, 1] = -1
     Tew[2, 2] = -1
-    Tew[2, 3] = ee_z_offset + object_size[2] / 2
+
+    if object_details["type"]=="box":
+        Tew[2, 3] = ee_z_offset + object_size[2] / 2
+        del_geom = s_f
+        del_geom_x = s_f - (object_size[0] / 2)
+        del_geom_y = s_f - (object_size[1] / 2)
+    else: #cylinder
+        Tew[2, 3] = ee_z_offset + object_size[1] / 2
+        del_geom = s_f
+        del_geom_x = s_f - (object_size[0])
+        del_geom_y = s_f - (object_size[0])
     # Tew[2, 3] = ee_z_offset + object_size[2] / 4
 
     Tews = make_Tew_yaw_variants(Tew)
 
-    del_geom = s_f
-    del_geom_x = s_f - (object_size[0] / 2)
-    del_geom_y = s_f - (object_size[1] / 2)
+    
 
     Bw = np.array(
         [

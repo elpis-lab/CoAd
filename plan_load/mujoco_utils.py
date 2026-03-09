@@ -144,13 +144,16 @@ def geoms_in_contact(
     model: mujoco.MjModel,
     data: mujoco.MjData,
     geoms_ids: set[int],
+    tolerance: float = 1e-3,
     verbose: bool = False,
 ) -> bool:
     """Check if the given geoms is in contact with others"""
     for i in range(data.ncon):
         c = data.contact[i]
 
-        if c.geom1 in geoms_ids or c.geom2 in geoms_ids:
+        if c.dist < -tolerance and (
+            c.geom1 in geoms_ids or c.geom2 in geoms_ids
+        ):
             if verbose:
                 g1 = mujoco.mj_id2name(
                     model, mujoco.mjtObj.mjOBJ_GEOM, c.geom1

@@ -6,6 +6,11 @@ import numpy as np
 import yaml
 import mujoco
 import mujoco.viewer
+import pickle
+
+import re
+from pathlib import Path
+
 
 from plan_load.mujoco_utils import joint_names_to_joint_ids
 from plan_load.mujoco_utils import joints_to_qpos_dof_ids
@@ -18,6 +23,7 @@ from plan_load.mujoco_utils import joints_to_limits
 from plan_load.task_generation import find_yaw_iTSR_set, find_iTSR_set
 from plan_load.task_generation import panda_TSR_parameters, fetch_TSR_parameters, ur10_TSR_parameters
 
+
 from plan_load.robot import MujocoRobot
 from plan_load.robot import Panda
 from plan_load.robot import UR10
@@ -27,14 +33,17 @@ def wrap_to_pi(a):
     return (a + np.pi) % (2*np.pi) - np.pi
 
 class MujocoEnv:
-    def __init__(self, robot):
+    def __init__(self, robot, custom_base=None):
         """Initialize object dimensions and common parameters"""
         if robot == "panda":
             self.robot_dir = "assets/franka_emika_panda"
         else:
             self.robot_dir = f"assets/{robot}"
         #self.base_xml = f"{self.robot_dir}/scene.xml"
-        self.base_xml = "scene.xml"
+        if custom_base is None:
+            self.base_xml = "scene.xml"
+        else:
+            self.base_xml = custom_base
 
         # Object parameters
         object_size = [0.03, 0.03, 0.15]
@@ -51,13 +60,21 @@ class MujocoEnv:
         # Updated during swept volume creation
         self.collision_geoms = []
     
-    def build_xml(self, parent_body_name="env_name", skip_ids=None):
-        '''Return xml for environment'''
-        
+    def build_xml(self, parent_body_name="env_name", skip_ids=None, rgba=None):
+        """Return xml for environment"""
+
         if skip_ids is None:
             skip_ids = set()
+
+        # Default to MuJoCo default gray if not provided
+        if rgba is None:
+            rgba = [0.5, 0.5, 0.5, 1]
+            rgba = [0.15, 1, 0.15, 1]
+            rgba = [0.133, 0.6, 0.329, 1]
+
         with open(self.scene_yaml, "r") as f:
             scene_yaml_data = yaml.safe_load(f)
+
         objs = scene_yaml_data["world"]["collision_objects"]
         lines = []
         lines.append(f'<body name="{parent_body_name}" pos="0 0 0">')
@@ -66,6 +83,7 @@ class MujocoEnv:
             obj_id = obj.get("id", "")
             if obj_id in skip_ids:
                 continue
+
             prim = obj["primitives"][0]
             pose = obj["primitive_poses"][0]
 
@@ -78,13 +96,11 @@ class MujocoEnv:
             self.collision_geoms.append(obj_id)
 
             if prim_type == "box":
-                # dims = [x, y, z]  -> size = half-dims
                 size = [dims[0] / 2.0, dims[1] / 2.0, dims[2] / 2.0]
                 mj_type = "box"
                 mj_size = size
 
             elif prim_type == "cylinder":
-                # cylinder dims = [height, radius]
                 height, radius = dims[0], dims[1]
                 mj_type = "cylinder"
                 mj_size = [radius, height / 2.0]
@@ -96,11 +112,12 @@ class MujocoEnv:
                 f'  <geom name="{obj_id}" type="{mj_type}" '
                 f'pos="{self.fmt(pos)}" quat="{self.fmt(quat_wxyz)}" '
                 f'size="{self.fmt(mj_size)}" '
-                f'contype="1" conaffinity="1" rgba="0.6 0.6 0.6 1"/>'
+                f'contype="1" conaffinity="1" '
+                f'rgba="{self.fmt(rgba)}"/>'
             )
 
         lines.append("</body>")
-        return "\n".join(lines)  
+        return "\n".join(lines)
 
     def fmt(self, v):
         '''Formatting for XML'''
@@ -116,28 +133,80 @@ class MujocoEnv:
         ]
         return quat_wxyz
 
+    # def build_model(self, xml_path, xmls_to_add):
+    #     """
+    #     Build final xml and model
+    #     xml_path: desired path for model's xml
+    #     xmls_to_add: list of xml strings to add to model, prepared from build_xml()
+    #     """
+        
+    #     curr_xml = f"""
+    #     <mujoco model="test_world">
+    #     <include file="{self.base_xml}"/>
+    #     <worldbody>
+    #     """
+    #     for primitive_xml in xmls_to_add:
+    #         curr_xml += f"{primitive_xml}"
+    
+    #     curr_xml += """
+    #         </worldbody>
+    #     </mujoco>
+    #     """
+    #     with open(xml_path, "w") as f:
+    #         f.write(curr_xml)
+    #     #print(xml_path)
+    #     model = mujoco.MjModel.from_xml_path(xml_path)
+    #     data = mujoco.MjData(model)
+    #     return model, data
+
     def build_model(self, xml_path, xmls_to_add):
         """
         Build final xml and model
         xml_path: desired path for model's xml
-        xmls_to_add: list of xml strings to add to model, prepared from build_xml()
+        xmls_to_add: list of xml fragments containing <asset> and/or <body>
         """
-        
+
+        asset_blocks = []
+        body_blocks = []
+
+        for frag in xmls_to_add:
+            # split fragment into asset + body parts
+            if "<asset" in frag:
+                start = frag.find("<asset")
+                end = frag.find("</asset>") + len("</asset>")
+                asset_blocks.append(frag[start:end])
+                frag = frag[:start] + frag[end:]
+
+            body_blocks.append(frag)
+
         curr_xml = f"""
-        <mujoco model="test_world">
+    <mujoco model="test_world">
         <include file="{self.base_xml}"/>
-        <worldbody>
-        """
-        for primitive_xml in xmls_to_add:
-            curr_xml += f"{primitive_xml}"
-    
+
+        <asset>
+    """
+        for a in asset_blocks:
+            # strip outer <asset> wrapper
+            inner = a.replace("<asset>", "").replace("</asset>", "")
+            curr_xml += inner + "\n"
+
         curr_xml += """
-            </worldbody>
-        </mujoco>
-        """
+        </asset>
+
+        <worldbody>
+    """
+
+        for b in body_blocks:
+            curr_xml += b + "\n"
+
+        curr_xml += """
+        </worldbody>
+    </mujoco>
+    """
+
         with open(xml_path, "w") as f:
             f.write(curr_xml)
-        #print(xml_path)
+
         model = mujoco.MjModel.from_xml_path(xml_path)
         data = mujoco.MjData(model)
         return model, data
@@ -156,6 +225,44 @@ class MujocoEnv:
         z = object_configs[:, 2, 0] 
 
         R_cyl = float(np.round(0.5 * np.sqrt(xdim**2 + ydim**2), 5))
+        cx = 0.5 * (x_upper + x_lower)
+        cy = 0.5 * (y_upper + y_lower)
+
+        b1_size = np.array([ (x_upper - x_lower) + 2*R_cyl,
+                            (y_upper - y_lower),
+                            np.full_like(cx, zdim) ]).T   # (B,3)
+
+        b2_size = np.array([ (x_upper - x_lower),
+                            (y_upper - y_lower) + 2*R_cyl,
+                            np.full_like(cx, zdim) ]).T   # (B,3)
+
+        b_pos = np.stack([cx, cy, z], axis=1)  # (B,3)
+
+        corners = np.stack([
+            np.stack([x_lower, y_lower, z], axis=1),
+            np.stack([x_lower, y_upper, z], axis=1),
+            np.stack([x_upper, y_lower, z], axis=1),
+            np.stack([x_upper, y_upper, z], axis=1),
+        ], axis=1)  # (B,4,3)
+
+        return R_cyl, b_pos, b1_size, b2_size, corners
+    
+    def compute_cyl_sv_params(self, object_dims, object_configs):
+        """Compute swept volume dimensions"""
+        object_configs = np.asarray(object_configs, dtype=np.float64)
+        #xdim, ydim, zdim = object_dims
+        rdim, zdim = object_dims  
+        if object_configs.ndim == 2:
+            object_configs = object_configs[None, :, :]
+
+        x_lower = object_configs[:, 0, 0]
+        x_upper = object_configs[:, 0, 1]
+        y_lower = object_configs[:, 1, 0]
+        y_upper = object_configs[:, 1, 1]
+        z = object_configs[:, 2, 0] 
+
+        #R_cyl = float(np.round(0.5 * np.sqrt(xdim**2 + ydim**2), 5))
+        R_cyl = rdim
         cx = 0.5 * (x_upper + x_lower)
         cy = 0.5 * (y_upper + y_lower)
 
@@ -205,6 +312,40 @@ class MujocoEnv:
         """
         return obj_xml
     
+    def cylinder_object_xml(self, object_dims, object_pose, fixed=False):
+        """Create cylinder object xml string"""
+
+        rgba = [0.8, 0.2, 0.2, 1]
+        name = "cube_object"
+
+        r, h = object_dims
+
+        object_x, object_y, object_z, object_yaw = object_pose
+
+        half = 0.5 * float(object_yaw)
+        qw = np.cos(half)
+        qx = 0.0
+        qy = 0.0
+        qz = np.sin(half)
+
+        joint_xml = "" if fixed else f'<joint name="{name}_free" type="free"/>'
+
+        obj_xml = f"""
+        <body name="{name}"
+            pos="{object_x} {object_y} {object_z}"
+            quat="{qw} {qx} {qy} {qz}">
+            {joint_xml}
+
+            <geom name="{name}_geom"
+                type="cylinder"
+                pos="0 0 0"
+                size="{r} {h/2}"
+                rgba="{rgba[0]} {rgba[1]} {rgba[2]} {rgba[3]}"/>
+        </body>
+        """
+
+        return obj_xml
+    
     def move_cube_object(self, object_pose):
         """
         Move cube_object to (x, y, z, yaw) by writing into its free joint qpos.
@@ -228,13 +369,18 @@ class MujocoEnv:
 
         mujoco.mj_forward(self.model, self.data)
 
-    def cube_swept_volume_xml(self, object_dims, object_configs, fixed=False):
+    def cube_swept_volume_xml(self, object_dims, object_configs, fixed=False, cyl=False):
         """Create swept volume xml string"""
         rgba = [0.8, 0.8, 0.8, 1]
         name = "swept_volume"
         joint_xml = "" if fixed else f'<joint name="{name}_free" type="free"/>'
         
-        R_cyl, b_pos, b1_size, b2_size, corners = self.compute_sv_params(object_dims, object_configs)
+        if cyl==True:
+            R_cyl, b_pos, b1_size, b2_size, corners = self.compute_cyl_sv_params(object_dims, object_configs)
+            z_cyl = object_dims[1]/2
+        else:
+            R_cyl, b_pos, b1_size, b2_size, corners = self.compute_sv_params(object_dims, object_configs)
+            z_cyl = object_dims[2]/2
 
         b_pos0 = b_pos[0]              # numpy (3,)
         b1_size0 = b1_size[0].tolist()
@@ -258,22 +404,22 @@ class MujocoEnv:
             <!-- cylinders at local corner offsets -->
             <geom name="sv_cyl1" type="cylinder"
                 pos="{corners_local[0,0]} {corners_local[0,1]} {corners_local[0,2]}"
-                size="{R_cyl} {object_dims[2]/2}"
+                size="{R_cyl} {z_cyl}"
                 rgba="{rgba[0]} {rgba[1]} {rgba[2]} {rgba[3]}"/>
 
             <geom name="sv_cyl2" type="cylinder"
                 pos="{corners_local[1,0]} {corners_local[1,1]} {corners_local[1,2]}"
-                size="{R_cyl} {object_dims[2]/2}"
+                size="{R_cyl} {z_cyl}"
                 rgba="{rgba[0]} {rgba[1]} {rgba[2]} {rgba[3]}"/>
 
             <geom name="sv_cyl3" type="cylinder"
                 pos="{corners_local[2,0]} {corners_local[2,1]} {corners_local[2,2]}"
-                size="{R_cyl} {object_dims[2]/2}"
+                size="{R_cyl} {z_cyl}"
                 rgba="{rgba[0]} {rgba[1]} {rgba[2]} {rgba[3]}"/>
 
             <geom name="sv_cyl4" type="cylinder"
                 pos="{corners_local[3,0]} {corners_local[3,1]} {corners_local[3,2]}"
-                size="{R_cyl} {object_dims[2]/2}"
+                size="{R_cyl} {z_cyl}"
                 rgba="{rgba[0]} {rgba[1]} {rgba[2]} {rgba[3]}"/>
         </body>
         """
@@ -677,9 +823,12 @@ class ShelfEnv(MujocoEnv):
             self.object_outer_rad = 0.75
         elif robot == "ur10":
             self.object_inner_rad = 0.3
+            #self.object_outer_rad = 1.1
             self.object_outer_rad = 0.65
 
-        self.object_yaw = 0.25*np.pi #-yaw to +yaw
+            #self.robot_pos[0] = self.robot_pos[0]-0.8
+
+        self.object_yaw = 0.01*np.pi #-yaw to +yaw
         self.object_details['dist'] = [
             self.object_outer_rad, self.object_outer_rad, 0, self.object_yaw
         ]
@@ -833,36 +982,559 @@ class ShelfEnv(MujocoEnv):
         return self.task_set
 
 
+class RealEnv(MujocoEnv):
+    """Real environment"""
+    def __init__(self, robot, no_sv=False):
+        """Initialize real environment"""
+        super().__init__(robot, custom_base="lab_scene.xml")
+        if robot!="ur10":
+            raise NotImplementedError("RealEnv only supports UR10")
+        
+        # Initialize object dimensions
+        self.object_details = {
+            'size': [0.045, 0.08], #[r, h]
+            'type': "cylinder",
+            'yaw': 0
+        }
+        #print(self.object_details['size'])
+        #object_path = self.select_object("mug")
+        #object_path = self.select_object("g_cups")
+        
+        self.robot_pos = [0, 0, 0]
+        self.robot_quat = [1, 0, 0, 0]
+        self.robot_quat = [0.70710678, 0.0, 0.0, 0.70710678]
+        self.robot_quat = [0.0, 0.0, 0.0, 1.0]
+        #self.robot_quat = [-0.70710678, 0.0, 0.0, 0.70710678]
+
+        base_pos = [0, 0, 0]
+        base_dim = [0, 0, 0]
+
+        self.object_yaw = 0*np.pi #-yaw to +yaw
+        self.object_inner_rad = 0.3
+        self.object_outer_rad = 1.0
+
+        self.object_details['dist'] = [
+            self.object_outer_rad, self.object_outer_rad, 0, self.object_yaw
+        ]
+
+        self.object_details['position'] = [
+            self.robot_pos[0], self.robot_pos[1], base_pos[2] + (base_dim[2]/2) + self.object_details['size'][1]/2
+        ]
+
+        #box_intervals = super().find_problem_intervals(base_name="base", wall_clearance=box_thickness)
+        
+        # table intervals
+        real_intervals = [
+            [-0.35, 0.07],
+            [-1.02, -0.70]
+        ]
+        # real_intervals = [
+        #     [-1, 1],
+        #     [-1, 1]
+        # ]
+        self.problem = {
+            'name': "box",
+            'intervals': real_intervals,
+            'robot': f"{robot}"   
+        }
+
+        # Find TSR parameters
+        sv_config = super().initialize_TSR_parameters(robot, grasp_strategy="top")
+
+        #print(self.object_details['size'])
+        if no_sv is True:
+            #pass
+            #print(self.object_details['size'])
+            #print(sv_config)
+            sv_xml = super().cylinder_object_xml(self.object_details['size'], [1, 1, 0, 0])
+        else:
+            sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config, cyl=True)
+        #sv_xml = self.mjcf_file_to_fragment(object_path)
+        xmls_to_add = [sv_xml]
+        
+        # Extra objects
+        #apple_xml = self.mjcf_file_to_fragment("assets/ycb/apple.xml")
+        #sugar_box_xml = self.mjcf_file_to_fragment("assets/ycb/sugar_box.xml")
+        #a_cups_xml = self.mjcf_file_to_fragment("assets/ycb/a_cups.xml")
+
+        #xmls_to_add.append(apple_xml)
+        #xmls_to_add.append(sugar_box_xml)
+        #xmls_to_add.append(a_cups_xml)
+
+        # b_cups_xml = self.mjcf_file_to_fragment("assets/ycb/b_cups.xml")
+        # xmls_to_add.append(b_cups_xml)
+
+        # c_cups_xml = self.mjcf_file_to_fragment("assets/ycb/c_cups.xml")
+        # xmls_to_add.append(c_cups_xml)
+
+        # d_cups_xml = self.mjcf_file_to_fragment("assets/ycb/d_cups.xml")
+        # xmls_to_add.append(d_cups_xml)
+
+        # g_cups_xml = self.mjcf_file_to_fragment("assets/ycb/g_cups.xml")
+        # xmls_to_add.append(g_cups_xml)
+
+        wall1_dims = (0.24, 0.45, 0.29)
+        wall_inflation = 0.07 # inflating by object's size (for return path)
+        wall1_dims = np.array(wall1_dims)*1.05        
+        wall1_dims = wall1_dims + wall_inflation/2
+
+        # build wall 1
+        wall_1_xml = self.build_primitive_body_xml(
+            body_name="wall1",
+            prim_type="box",
+            pos=(0.32, -0.82, 0.145),
+            dims=wall1_dims.tolist(),
+            quat_xyzw=(0, 0, 0, 1),
+            make_free=False,
+        )
+        xmls_to_add.append(wall_1_xml)
+
+        # build wall 2
+        wall_2_xml = self.build_primitive_body_xml(
+            body_name="wall2",
+            prim_type="box",
+            pos=(-0.055, -0.46, 0.135),
+            dims=(0.48, 0.34, 0.27),
+            quat_xyzw=(0, 0, 0, 1),
+            make_free=False,
+        )
+        xmls_to_add.append(wall_2_xml)
+
+        # build block 1
+        block_1_xml = self.build_primitive_body_xml(
+            body_name="block1",
+            prim_type="box",
+            pos=(0.205, -0.51, 0.1),
+            dims=(0.09, 0.09, 0.2),
+            quat_xyzw=(0, 0, 0, 1),
+            make_free=False,
+        )
+        xmls_to_add.append(block_1_xml)
+
+        # build packing
+        packing_1_xml = self.build_primitive_body_xml(
+            body_name="packing1",
+            prim_type="box",
+            pos=(0.55, -0.80, 0.01),
+            dims=(0.21, 0.36, 0.02),
+            quat_xyzw=(0, 0, 0, 1),
+            make_free=False,
+        )
+        xmls_to_add.append(packing_1_xml)
+
+        # --- parameters ---
+        cx, cy, z_floor = 0.55, -0.80, 0.01
+        Lx, Ly, t_floor = 0.21, 0.36, 0.02
+
+        t_wall = 0.02
+        h_wall = 0.13  # <-- change this to how tall you want the hollow box
+        h_wall = 0.13 + wall_inflation
+
+        z_top = z_floor + t_floor / 2.0
+        z_wall = z_top + h_wall / 2.0
+
+        x_off = (Lx / 2.0) - (t_wall / 2.0)
+        y_off = (Ly / 2.0) - (t_wall / 2.0)
+
+        # Left wall (thin in x, spans y, tall in z)
+        packing_2_xml = self.build_primitive_body_xml(
+            body_name="packing2_left",
+            prim_type="box",
+            pos=(cx - x_off, cy, z_wall),
+            dims=(t_wall, Ly, h_wall),
+            quat_xyzw=(0, 0, 0, 1),
+            make_free=False,
+        )
+
+        # Right wall
+        packing_3_xml = self.build_primitive_body_xml(
+            body_name="packing3_right",
+            prim_type="box",
+            pos=(cx + x_off, cy, z_wall),
+            dims=(t_wall, Ly, h_wall),
+            quat_xyzw=(0, 0, 0, 1),
+            make_free=False,
+        )
+
+        # Bottom wall (thin in y, spans x, tall in z)
+        packing_4_xml = self.build_primitive_body_xml(
+            body_name="packing4_bottom",
+            prim_type="box",
+            pos=(cx, cy - y_off, z_wall),
+            dims=(Lx, t_wall, h_wall),
+            quat_xyzw=(0, 0, 0, 1),
+            make_free=False,
+        )
+
+        # Top wall
+        packing_5_xml = self.build_primitive_body_xml(
+            body_name="packing5_top",
+            prim_type="box",
+            pos=(cx, cy + y_off, z_wall),
+            dims=(Lx, t_wall, h_wall),
+            quat_xyzw=(0, 0, 0, 1),
+            make_free=False,
+        )
+
+        xmls_to_add.append(packing_2_xml)
+        xmls_to_add.append(packing_3_xml)
+        xmls_to_add.append(packing_4_xml)
+        xmls_to_add.append(packing_5_xml)
+
+        # upper boundary
+        upper_boundary_xml = self.build_primitive_body_xml(
+            body_name="ub1",
+            prim_type="box",
+            pos=(0, -0.50, 1.02),
+            dims=(1.5, 1.5, 0.02),
+            quat_xyzw=(0, 0, 0, 1),
+            make_free=False,
+        )
+        xmls_to_add.append(upper_boundary_xml)
+
+        # upper boundary
+        back_boundary_xml = self.build_primitive_body_xml(
+            body_name="bb1",
+            prim_type="box",
+            pos=(0, 0.40, 0.8),
+            dims=(2, 0.02, 1.60),
+            quat_xyzw=(0, 0, 0, 1),
+            make_free=False,
+        )
+        xmls_to_add.append(back_boundary_xml)
+
+        left_boundary_xml = self.build_primitive_body_xml(
+            body_name="lb1",
+            prim_type="box",
+            pos=(-0.82, -0.50, 0.8),
+            dims=(0.02, 2, 1.60),
+            quat_xyzw=(0, 0, 0, 1),
+            make_free=False,
+        )
+        xmls_to_add.append(left_boundary_xml)
+
+        right_boundary_xml = self.build_primitive_body_xml(
+            body_name="rb1",
+            prim_type="box",
+            pos=(0.82, -0.50, 0.8),
+            dims=(0.02, 2, 1.60),
+            quat_xyzw=(0, 0, 0, 1),
+            make_free=False,
+        )
+        xmls_to_add.append(right_boundary_xml)
+
+        free_xml_path = f"{self.robot_dir}/real_scene.xml"
+        self.xmls_to_add = xmls_to_add
+        self.model, self.data = super().build_model(free_xml_path, xmls_to_add)
+
+        #self.randomize_object_positions(["mug", "apple", "sugar_box", "a_cups"], [0.05, 0.05, 0.1, 0.1])
+        #self.model, self.data = build_model_with_fragments(free_xml_path, xmls_to_add)
+    #def cup_object_xml(self, fixed=False):
+
+
+
+    def build_primitive_body_xml(
+        self,
+        body_name: str,
+        geom_name: str | None = None,
+        prim_type: str = "box",
+        dims: list[float] | tuple[float, ...] = (1.0, 1.0, 1.0),
+        pos: list[float] | tuple[float, float, float] = (0.0, 0.0, 0.0),
+        quat_xyzw: list[float] | tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0),
+        rgba: list[float] | tuple[float, float, float, float] | None = None,
+        contype: int = 1,
+        conaffinity: int = 1,
+        make_free: bool = False,
+    ) -> str:
+        """
+        Create XML for a single primitive inside its own <body>, similar to build_xml().
+
+        - prim_type: "box" or "cylinder"
+        * box dims = (lx, ly, lz)  -> mj_size = (lx/2, ly/2, lz/2)
+        * cylinder dims = (height, radius) -> mj_size = (radius, height/2)
+        - quat_xyzw is converted to MuJoCo quat order (w x y z)
+        - If make_free=True, adds <joint type="free"> so you can move the body by setting qpos later.
+        """
+
+        if rgba is None:
+            rgba = [0.133, 0.6, 0.329, 1.0]  # your last default
+            rgba = [0.75, 0.75, 0.75, 1.0]
+
+        if geom_name is None:
+            geom_name = body_name
+
+        prim_type = prim_type.lower()
+        dims = list(dims)
+
+        quat_wxyz = self.quat_xyzw_to_wxyz(quat_xyzw)
+
+        if prim_type == "box":
+            if len(dims) != 3:
+                raise ValueError(f"box dims must be (lx, ly, lz), got {dims}")
+            mj_type = "box"
+            mj_size = [dims[0] / 2.0, dims[1] / 2.0, dims[2] / 2.0]
+
+        elif prim_type == "cylinder":
+            if len(dims) != 2:
+                raise ValueError(f"cylinder dims must be (height, radius), got {dims}")
+            height, radius = dims[0], dims[1]
+            mj_type = "cylinder"
+            mj_size = [radius, height / 2.0]
+
+        else:
+            raise ValueError(f"Unsupported primitive type: {prim_type}")
+
+        lines = []
+        lines.append(f'<body name="{body_name}" pos="0 0 0">')
+
+        if make_free:
+            # Free joint so the body's pose is controlled via qpos (7 values: x y z qw qx qy qz)
+            lines.append(f'  <joint name="{body_name}_free" type="free"/>')
+
+        # Match your pattern: pose on geom (not body)
+        lines.append(
+            f'  <geom name="{geom_name}" type="{mj_type}" '
+            f'pos="{self.fmt(pos)}" quat="{self.fmt(quat_wxyz)}" '
+            f'size="{self.fmt(mj_size)}" '
+            f'contype="{contype}" conaffinity="{conaffinity}" '
+            f'rgba="{self.fmt(rgba)}"/>'
+        )
+
+        lines.append("</body>")
+        return "\n".join(lines)
+
+    def randomize_object_positions(self, objects, object_heights):
+        for i, object in enumerate(objects):
+            joint_name = f"{object}_joint"
+            
+            x = np.random.uniform(-0.5, 0.5)
+            y = np.random.uniform(-0.5,- 0.1)
+            z = object_heights[i]/2
+            yaw = np.random.uniform(-np.pi, np.pi)
+
+            jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+            qadr = self.model.jnt_qposadr[jid]
+            vadr = self.model.jnt_dofadr[jid]
+
+            half = 0.5 * float(yaw)
+            qw = np.cos(half)
+            qx = 0.0
+            qy = 0.0
+            qz = np.sin(half)
+
+            # free joint qpos layout: [x y z qw qx qy qz]
+            self.data.qpos[qadr:qadr+7] = [x, y, z, qw, qx, qy, qz]
+            self.data.qvel[vadr:vadr+6] = 0.0
+
+            mujoco.mj_forward(self.model, self.data)
+
+
+
+    def select_object(self, object_name):
+        if object_name == "mug":
+            object_path =  "assets/ycb/mug.xml"
+            self.object_details = {
+                'size': [0.05, 0.052, 0.052],
+                'type': "mug",
+                'yaw': 0
+            }
+            self.yaw_buffer = 6*(np.pi/180)
+            return object_path
+        elif object_name == "a_cups":
+            object_path =  "assets/ycb/a_cups.xml"
+            self.object_details = {
+                'size': [0.05, 0.052, 0.052],
+                'type': "a_cups",
+                'yaw': 0
+            }
+            self.yaw_buffer = 6*(np.pi/180)
+            return object_path
+        elif object_name == "g_cups":
+            object_path =  "assets/ycb/g_cups.xml"
+            self.object_details = {
+                'size': [0.05, 0.052, 0.06],
+                'type': "g_cups",
+                'yaw': 0
+            }
+            self.yaw_buffer = 6*(np.pi/180)
+            return object_path
+
+    def mjcf_file_to_fragment(self, path: str) -> str:
+        """Read a standalone MJCF file and return an MJCF fragment:
+        <asset>...</asset> + worldbody contents (bodies).
+        """
+        text = Path(path).read_text()
+
+        # grab asset block (optional)
+        m_asset = re.search(r"<asset\b[^>]*>.*?</asset>", text, flags=re.DOTALL)
+        asset = m_asset.group(0) if m_asset else ""
+
+        # grab contents inside <worldbody>...</worldbody>
+        m_world = re.search(r"<worldbody\b[^>]*>(.*?)</worldbody>", text, flags=re.DOTALL)
+        if not m_world:
+            raise ValueError(f"No <worldbody> found in {path}")
+        world_contents = m_world.group(1).strip()
+
+        # return fragment: assets + bodies (no <worldbody> wrapper)
+        return (asset + "\n\n" + world_contents).strip()
+
+
+def to_rad(q_degrees):
+    q_rad = []
+    for q_deg in q_degrees:
+        q_rad.append(q_deg*np.pi/180)
+    
+    return q_rad
 
 if __name__=="__main__":
     # Load environment and generate task set
-    robot = "panda"
-    #env = ShelfEnv(robot)
-    env = TableEnv(robot)
+    robot_chosen = "ur10"
+    environment = "real"
+    ik = "neighbor"
+    planner = "RRTConnect"
+
+    if environment == "table":
+        env = TableEnv(robot_chosen, no_sv=True)
+    elif environment == "cage":
+        env = CageEnv(robot_chosen, no_sv=True)
+    elif environment == "shelf":
+        env = ShelfEnv(robot_chosen, no_sv=True)
+    elif environment == "real":
+        env = RealEnv(robot_chosen, no_sv=True)
+    else:
+        env = FreeEnv(robot_chosen, no_sv=True)
+
     model, data = env.model, env.data
     #task_set = env.generate_task_set()
-    #print(f"Bins generated: {len(task_set)}")
-    # Load robot and test
-    
-    #robot = Panda(model, visualize=True)
-    # robot.set_joint_qpos(
-    #    np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785])
-    # )
+    #env.move_cube_object([-env.object_outer_rad, -env.object_outer_rad, env.object_details['position'][2], 0])    
 
-    robot = Panda(model, data, visualize=True)
+    folder = f"data/{environment}_{robot_chosen}"
+    # task_set = pickle.load(open(f"{folder}/task_set.pkl", "rb"))
+
+    # d_name = f"{folder}/task_paths_data_{ik}_{planner}.npy"
+    # path_data = np.load(d_name, allow_pickle=True)
+    # k_name = f"{folder}/task_paths_keys_{ik}_{planner}.pkl"
+    # keys = pickle.load(open(k_name, "rb"))
+    # task_paths = {key: data for key, data in zip(keys, path_data)}
+
+    # solved_task_keys = [
+    #     key for key, value in task_paths.items()
+    #     if value is not None and len(value) > 1
+    # ]
+
+    #task_keys = list(task_set.keys())
+    # task_keys = solved_task_keys
+    # random_ind = np.random.randint(0, len(task_keys))
+    # key = task_keys[random_ind]
+
+
+    if robot_chosen == "panda":
+        robot = Panda(model, data, visualize=True)
+    elif robot_chosen == "fetch":
+        robot = FetchArm(model, data, visualize=True)
+    else:
+        robot = UR10(model, data, visualize=True)
     robot.teleport_base(np.array([env.robot_pos]), np.array(env.robot_quat))
+
+
+    # if robot_chosen == "fetch":
+    #     robot = FetchArm(model, data, visualize=True, prefix="f1_")
+    #     robot2 = FetchArm(model, data, visualize=False, prefix="f2_")
+    # elif robot_chosen == "panda":
+    #     robot = Panda(model, data, visualize=True, prefix="f1_")
+    #     robot2 = Panda(model, data, visualize=False, prefix="f2_")
+    # robot.teleport_base(np.array([env.robot_pos]), np.array(env.robot_quat))
+    # robot2.teleport_base(np.array([env.robot_pos]), np.array(env.robot_quat))
+    
 
     # Configure camera
     robot.viewer.cam.lookat[:] = [0.25, -0.25, 0.5]
     robot.viewer.cam.distance = 1.75
     robot.viewer.cam.azimuth = 120
     robot.viewer.cam.elevation = -20
+    camview = robot.viewer.cam
+    # table
+    if environment == "table":
+        robot.viewer.cam.lookat[:] = [0.90100131, 0.15017647, 0.63007395]
+        robot.viewer.cam.distance = 3.4766360559393026
+        robot.viewer.cam.azimuth = -59.922579098753594
+        robot.viewer.cam.elevation = -16.780680728667303
+
+        camview.lookat = [1.0493371,  0.05479526, 0.52797369]
+        camview.distance = 3.895318011088692
+        camview.azimuth = 55.705417066155334
+        camview.elevation = -40.769175455417056
+
+
+    elif environment == "cage":
+        robot.viewer.cam.lookat[:] = [0.52086037, -0.06213331,  0.49931841]
+        robot.viewer.cam.distance = 3.079438735523704
+        robot.viewer.cam.azimuth = -43.93624161073823
+        robot.viewer.cam.elevation = -15.453259827420883
+
+        camview.lookat = [0.45476833, 0.04653378, 0.75122542]
+        camview.distance = 2.702403732778341
+        camview.azimuth = 29.927612655800647
+        camview.elevation = -17.351629913710447
+
+        camview.lookat = [0.45352783, 0.04873283, 0.63760923]
+        camview.distance = 3.178760106296739
+        camview.azimuth = 29.08245445829346
+        camview.elevation = -23.564477468839865
+
+
+    else:
+        robot.viewer.cam.lookat[:] = [0.84953477, 0.10998711, 0.76237909]
+        robot.viewer.cam.distance = 3.4766360559393026
+        robot.viewer.cam.azimuth = -50.630632790028756
+        robot.viewer.cam.elevation = -18.232262703739217
+
+        camview.lookat = [0.82747485, 0.12431182, 0.70116041]
+        camview.distance = 3.7227554157167515
+        camview.azimuth = 35.47267497603071
+        camview.elevation = -14.435522531160109
+
+    pos1 = [[1000, 1000], [0, 0], [0.05, 0.05], [0, 0]]
+    #env.move_swept_volume(pos1)
     
-    pos1 = [[1, 0], [0, 0], [0.05, 0.05], [0, 0]]
-    env.move_swept_volume(pos1)
+    new_home_pos = np.array([117.52, -61.10, 89.46, -119.21, -91.35, 30.14])
+    new_home_pos = np.array([116.36, -62.72, 90.52, -118.66, -91.32, 28.99])
+    new_home_pos = to_rad(new_home_pos)
+    print(new_home_pos)
+    robot.set_joint_qpos(new_home_pos)
+
+    #env.move_swept_volume(task_keys[random_ind])
+    # sample = [float(np.random.uniform(lo, hi)) for (lo, hi) in key]
+    # env.move_cube_object(sample)
 
     print(f"in contact: {robot.in_contact()}")
     robot.viewer.sync()
+
+    # cameraPos = None
+    # while(cameraPos is None):
+    #     cam = robot.viewer.cam
+    #     cameraPos = input("print camera pos?")
+    
+    # print("lookat   :", cam.lookat)
+    # print("distance :", cam.distance)
+    # print("azimuth  :", cam.azimuth)
+    # print("elevation:", cam.elevation)
+
+    # while(True):
+    #     random_ind = np.random.randint(0, len(task_keys))
+    #     random_key = task_keys[random_ind]
+    #     env.move_swept_volume(random_key)
+    #     robot.viewer.sync()
+
+    #     path = task_paths[random_key]
+    #     goal = path[-1]
+
+    #     action = input()
+        
+    #     if action != "":
+    #         robot.set_joint_qpos(goal)
+    #         robot.viewer.sync()
+    #         input()
 
     # Keep the viewer
     try:

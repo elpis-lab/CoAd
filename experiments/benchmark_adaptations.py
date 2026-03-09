@@ -21,7 +21,7 @@ from experiments.evaluate import traj_len
 from plan_load.utils import set_seed, load_env_and_robot, get_data_folder
 from plan_load.planning import OMPLPlanner, euclidean_path_length
 
-from plan_load.env import FreeEnv, CageEnv, BoxEnv, TableEnv, ShelfEnv
+from plan_load.env import FreeEnv, CageEnv, BoxEnv, TableEnv, ShelfEnv, RealEnv
 from plan_load.robot import Panda, UR10, FetchArm
 
 
@@ -206,7 +206,10 @@ def evaluate_adaptations(
         adaptation_times[f"{adaptation}"] = []
         adaptation_lengths[f"{adaptation}"] = []
 
-        suffix = f"{args.ik}_{args.planner}_{adaptation}_{args.n_neighbors}"
+        if adaptation == 'dmp' and args.env=="real" and args.robot == "ur10":
+            suffix = f"{args.ik}_{args.planner}_{adaptation}_100"
+        else:
+            suffix = f"{args.ik}_{args.planner}_{adaptation}_{args.n_neighbors}"
         root_path = f"{folder}/root_paths_{suffix}.pkl"
         map_path = f"{folder}/key_to_root_{suffix}.pkl"
         
@@ -388,7 +391,10 @@ def main(args):
 
     adaptations_found = []
     for adaptation in ['grr', 'opt', 'dmp']:
-        suffix = f"{args.ik}_{args.planner}_{adaptation}_{args.n_neighbors}"
+        if adaptation == 'dmp' and args.env=="real" and args.robot == "ur10":
+            suffix = f"{args.ik}_{args.planner}_{adaptation}_100"
+        else:
+            suffix = f"{args.ik}_{args.planner}_{adaptation}_{args.n_neighbors}"
         root_path = f"{folder}/root_paths_{suffix}.pkl"
         map_path = f"{folder}/key_to_root_{suffix}.pkl"
         root_exists = os.path.exists(root_path)
@@ -414,6 +420,8 @@ def main(args):
         env = ShelfEnv(robot_name, no_sv=True)
     elif env_name == "free":
         env = FreeEnv(robot_name, no_sv=True)
+    elif env_name == "real":
+        env = RealEnv(robot_name, no_sv=True)
     else:
         raise ValueError(f"Invalid environment: {env_name}")
 
@@ -444,7 +452,7 @@ def parse_arguments():
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument(
         "--env",
-        choices=["table", "box", "cage", "shelf", "free"],
+        choices=["table", "box", "cage", "shelf", "free", "real"],
         default="table",
     )
     parser.add_argument(
