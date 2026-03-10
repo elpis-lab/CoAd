@@ -26,25 +26,25 @@ for robot in "${robots[@]}"; do
 
     # 1 Generate task set
     if [ "$overwrite_task_set" = true ]; then
-      python "$PLAN_LOAD_DIR/generate_task_set.py" \
+      python "$script_dir/generate_task_set.py" \
         --robot "$robot" \
         --env "$env" \
         --overwrite
     else
-      python "$PLAN_LOAD_DIR/generate_task_set.py" \
+      python "$script_dir/generate_task_set.py" \
         --robot "$robot" \
         --env "$env"
     fi
 
     # 2 Generate joint goal set
     if [ "$overwrite_joint_goal_set" = true ]; then
-      python "$PLAN_LOAD_DIR/generate_joint_goal_set.py" \
+      python "$script_dir/generate_joint_goal_set.py" \
         --robot "$robot" \
         --env "$env" \
         --ik "$ik" \
         --overwrite
     else
-      python "$PLAN_LOAD_DIR/generate_joint_goal_set.py" \
+      python "$script_dir/generate_joint_goal_set.py" \
         --robot "$robot" \
         --env "$env" \
         --ik "$ik"

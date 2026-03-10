@@ -2,8 +2,6 @@
 set -euo pipefail
 root_dir="$(dirname "$(realpath "$0")")/.."
 script_dir="$root_dir/plan_load"
-ROOT_DIR="$(dirname "$(realpath "$0")")/.."
-PLAN_LOAD_DIR="$ROOT_DIR/plan_load"
 
 # Start timer
 start_time=$(date +%s)
@@ -35,7 +33,7 @@ for robot in "${robots[@]}"; do
       echo "=== Condensing: ${robot} in ${env}, adaptation=${adaptation} ==="
 
       if [ "$overwrite_condensed_graph" = true ]; then
-        python "$PLAN_LOAD_DIR/condense_task_paths.py" \
+        python "$script_dir/condense_task_paths.py" \
           --robot "$robot" \
           --env "$env" \
           --ik "$ik" \
@@ -43,7 +41,7 @@ for robot in "${robots[@]}"; do
           --adaptation "$adaptation" \
           --overwrite
       else
-        python "$PLAN_LOAD_DIR/condense_task_paths.py" \
+        python "$script_dir/condense_task_paths.py" \
           --robot "$robot" \
           --env "$env" \
           --ik "$ik" \

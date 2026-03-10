@@ -2,8 +2,6 @@
 set -euo pipefail
 root_dir="$(dirname "$(realpath "$0")")/.."
 script_dir="$root_dir/plan_load"
-ROOT_DIR="$(dirname "$(realpath "$0")")/.."
-PLAN_LOAD_DIR="$ROOT_DIR/plan_load"
 
 # Start timer
 start_time=$(date +%s)
@@ -38,25 +36,25 @@ for robot in "${robots[@]}"; do
 
     # 1 Generate task set
     if [ "$overwrite_task_set" = true ]; then
-      python "$PLAN_LOAD_DIR/generate_task_set.py" \
+      python "$script_dir/generate_task_set.py" \
         --robot "$robot" \
         --env "$env" \
         --overwrite
     else
-      python "$PLAN_LOAD_DIR/generate_task_set.py" \
+      python "$script_dir/generate_task_set.py" \
         --robot "$robot" \
         --env "$env"
     fi
 
     # 2 Generate joint goal set
     if [ "$overwrite_joint_goal_set" = true ]; then
-      python "$PLAN_LOAD_DIR/generate_joint_goal_set.py" \
+      python "$script_dir/generate_joint_goal_set.py" \
         --robot "$robot" \
         --env "$env" \
         --ik "$ik" \
         --overwrite
     else
-      python "$PLAN_LOAD_DIR/generate_joint_goal_set.py" \
+      python "$script_dir/generate_joint_goal_set.py" \
         --robot "$robot" \
         --env "$env" \
         --ik "$ik"
@@ -64,14 +62,14 @@ for robot in "${robots[@]}"; do
 
     # 3 Generate task path set
     if [ "$overwrite_task_paths" = true ]; then
-      python "$PLAN_LOAD_DIR/generate_task_paths.py" \
+      python "$script_dir/generate_task_paths.py" \
         --robot "$robot" \
         --env "$env" \
         --ik "$ik" \
         --planner "$planner" \
         --overwrite
     else
-      python "$PLAN_LOAD_DIR/generate_task_paths.py" \
+      python "$script_dir/generate_task_paths.py" \
         --robot "$robot" \
         --env "$env" \
         --ik "$ik" \
@@ -83,7 +81,7 @@ for robot in "${robots[@]}"; do
       echo "=== Condensing: ${robot} in ${env}, adaptation=${adaptation} ==="
 
       if [ "$overwrite_condensed_graph" = true ]; then
-        python "$PLAN_LOAD_DIR/condense_task_paths.py" \
+        python "$script_dir/condense_task_paths.py" \
           --robot "$robot" \
           --env "$env" \
           --ik "$ik" \
@@ -91,7 +89,7 @@ for robot in "${robots[@]}"; do
           --adaptation "$adaptation" \
           --overwrite
       else
-        python "$PLAN_LOAD_DIR/condense_task_paths.py" \
+        python "$script_dir/condense_task_paths.py" \
           --robot "$robot" \
           --env "$env" \
           --ik "$ik" \
