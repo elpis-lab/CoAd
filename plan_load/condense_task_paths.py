@@ -22,7 +22,7 @@ def condense_dataset(
     robot: MujocoRobot,
     task_paths,
     adaptation,
-    n_neighbors=100,
+    n_neighbors=1000,
 ):
     """
     Condense a dataset of joint-space paths by greedily picking root paths
@@ -95,7 +95,7 @@ def condense_dataset(
         #     for q in path:
         #         robot.set_joint_qpos(q)
         #         robot.viewer.sync()
-        #         time.sleep(0.005)
+        #         time.sleep(0.008)
 
         # input("PATH1")
         # # visualize_path(center_path)
@@ -161,8 +161,9 @@ def condense_dataset(
             t1 = time.perf_counter()
 
             # input(f"NEIGHBOR PATH {valid}")
-            # adapted_nb = adapter.adapt(adapted_center, q_nb_end)
-            # visualize_path(adapted_nb)
+            # if valid:
+            #     adapted_nb = adapter.adapt(adapted_center, q_nb_end)
+            #     visualize_path(adapted_nb)
             # for i in range(7):
             #     axs[i].plot(center_path[:, i])
             #     axs[i].plot(adapted_nb[:, i])

@@ -1082,7 +1082,7 @@ class RealEnv(MujocoEnv):
         wall_1_xml = self.build_primitive_body_xml(
             body_name="wall1",
             prim_type="box",
-            pos=(0.32, -0.82, 0.145),
+            pos=(0.24, -0.82, 0.145),
             dims=wall1_dims.tolist(),
             quat_xyzw=(0, 0, 0, 1),
             make_free=False,
@@ -1093,7 +1093,7 @@ class RealEnv(MujocoEnv):
         wall_2_xml = self.build_primitive_body_xml(
             body_name="wall2",
             prim_type="box",
-            pos=(-0.055, -0.46, 0.135),
+            pos=(-0.07, -0.47, 0.135),
             dims=(0.48, 0.34, 0.27),
             quat_xyzw=(0, 0, 0, 1),
             make_free=False,
@@ -1115,7 +1115,7 @@ class RealEnv(MujocoEnv):
         packing_1_xml = self.build_primitive_body_xml(
             body_name="packing1",
             prim_type="box",
-            pos=(0.55, -0.80, 0.01),
+            pos=(0.54, -0.80, 0.01),
             dims=(0.21, 0.36, 0.02),
             quat_xyzw=(0, 0, 0, 1),
             make_free=False,
@@ -1123,12 +1123,12 @@ class RealEnv(MujocoEnv):
         xmls_to_add.append(packing_1_xml)
 
         # --- parameters ---
-        cx, cy, z_floor = 0.55, -0.80, 0.01
+        cx, cy, z_floor = 0.54, -0.80, 0.01
         Lx, Ly, t_floor = 0.21, 0.36, 0.02
 
         t_wall = 0.02
         h_wall = 0.13  # <-- change this to how tall you want the hollow box
-        h_wall = 0.13 + wall_inflation
+        h_wall = 0.10 + wall_inflation
 
         z_top = z_floor + t_floor / 2.0
         z_wall = z_top + h_wall / 2.0

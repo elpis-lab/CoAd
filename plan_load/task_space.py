@@ -2,7 +2,7 @@ import math
 import numpy as np
 
 from sklearn.neighbors import BallTree
-from plan_load.pose import angle_diff
+from geometry.pose import angle_diff
 
 
 def env_distance(p1, p2, position_weight=1.0, rotation_weight=0.5):

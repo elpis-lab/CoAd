@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from plan_load.env import MujocoEnv
 from plan_load.robot import MujocoRobot
-from plan_load.pose import Pose, matrix_to_flat, wrap_to_pi
+from geometry.pose import Pose, matrix_to_flat, wrap_to_pi
 from plan_load.utils import set_seed, load_env_and_robot, get_data_folder
 from plan_load.task_space import build_task_nn
 from plan_load.mink_ik import get_ik_solver

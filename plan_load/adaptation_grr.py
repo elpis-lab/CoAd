@@ -15,7 +15,7 @@ from collections import deque
 
 from plan_load.robot import MujocoRobot
 from plan_load.mink_ik import IK
-from plan_load.pose import Pose
+from geometry.pose import Pose
 
 
 def joint_distance(q1, q2):
