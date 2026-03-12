@@ -5,20 +5,8 @@ import time
 import numpy as np
 import yaml
 import mujoco
-import mujoco.viewer
-import pickle
-
 import re
 from pathlib import Path
-
-
-from plan_load.mujoco_utils import joint_names_to_joint_ids
-from plan_load.mujoco_utils import joints_to_qpos_dof_ids
-from plan_load.mujoco_utils import joints_to_limits
-
-# from plan_load.TSR_generation import panda_TSR_parameters, fetch_TSR_parameters, ur10_TSR_parameters
-# from plan_load.TSR_generation import find_yaw_iTSR_set
-# from plan_load.TSR_generation import find_iTSR_set
 
 from plan_load.task_generation import find_yaw_iTSR_set, find_iTSR_set
 from plan_load.task_generation import (
@@ -26,8 +14,6 @@ from plan_load.task_generation import (
     fetch_TSR_parameters,
     ur10_TSR_parameters,
 )
-
-
 from plan_load.robot import MujocoRobot
 from plan_load.robot import Panda
 from plan_load.robot import UR10
