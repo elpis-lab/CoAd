@@ -66,15 +66,15 @@ Here is a comparison among three methods in both real world and simulation. Over
 <table align="center">
   <tr>
     <td align="center">
-      <img src="doc/li.gif" width="300"><br>
+      <img src="doc/li.gif" width="250"><br>
       LI adaptation
     </td>
     <td align="center">
-      <img src="doc/dmp.gif" width="300"><br>
+      <img src="doc/dmp.gif" width="250"><br>
       DMP adaptation
     </td>
     <td align="center">
-      <img src="doc/sto.gif" width="300"><br>
+      <img src="doc/sto.gif" width="250"><br>
       STO adaptation
     </td>
   </tr>
