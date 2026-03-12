@@ -17,3 +17,5 @@ venv/
 
 # Dataset
 data/
+*.pkl
+*.npy

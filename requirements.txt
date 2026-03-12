@@ -1,0 +1,6 @@
+mujoco 
+mink 
+osqp 
+tqdm 
+scikit-learn
+scipy

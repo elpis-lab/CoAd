@@ -9,24 +9,25 @@ import argparse
 from scipy.spatial import cKDTree
 
 from tqdm import tqdm
-from plan_load.env import MujocoEnv
-from plan_load.robot import MujocoRobot
-from plan_load.mink_ik import get_ik_solver
+from coad.env import MujocoEnv
+from coad.robot import MujocoRobot
+from coad.mink_ik import get_ik_solver
 
-from plan_load.adaptation import LinearAdapter, GRRAdapter
-from plan_load.adaptation import DMPAdapter, TrajOptAdapter
+from coad.adaptation import LinearAdapter, GRRAdapter
+from coad.adaptation import DMPAdapter, TrajOptAdapter
 
-# from plan_load.task_space import deep_tuple
-from experiments.evaluate import traj_len
-from plan_load.utils import set_seed, load_env_and_robot, get_data_folder
-from plan_load.planning import OMPLPlanner, euclidean_path_length
+# from coad.task_space import deep_tuple
+from experiments.visualize_paths import traj_len
+from coad.utils import set_seed, load_env_and_robot, get_data_folder
+from coad.planning import OMPLPlanner, euclidean_path_length
 
-from plan_load.env import FreeEnv, CageEnv, BoxEnv, TableEnv, ShelfEnv
-from plan_load.robot import Panda, UR10, FetchArm
+from coad.env import FreeEnv, CageEnv, BoxEnv, TableEnv, ShelfEnv
+from coad.robot import Panda, UR10, FetchArm
 
 
 folder1 = "dataset/top_naive"
 folder2 = "dataset/top"
+
 
 class BoxGrid:
     def __init__(self, keys_to_root, tol=1e-12):
@@ -78,7 +79,12 @@ class BoxGrid:
 
         for bin_idx, key in enumerate(self.keys_list):
 
-            x_min, y_min, z_val, yaw_min = key[0][0], key[1][0], key[2][0], key[3][0]
+            x_min, y_min, z_val, yaw_min = (
+                key[0][0],
+                key[1][0],
+                key[2][0],
+                key[3][0],
+            )
 
             # X/Y via direct lookup
             ix = self._x_to_ix[float(x_min)]
@@ -130,10 +136,10 @@ class BoxGrid:
 
         return self.keys_list[bin_idx]
 
-
     @staticmethod
     def _wrap_pi(a):
         return (a + np.pi) % (2 * np.pi) - np.pi
+
 
 def deep_tuple(x):
     # NumPy array
@@ -158,7 +164,8 @@ def get_avg_path_length(root_path, key_map):
         lengths[i] = traj_len(path)
     return np.mean(lengths)
 
-class Library():
+
+class Library:
     def __init__(
         self,
         N: int,
@@ -168,23 +175,23 @@ class Library():
         key_to_root,
         solved_keys,
         task_paths,
-        data
+        data,
     ):
         """Build library"""
         self.key_to_root = key_to_root
         self.task_paths = task_paths
-        #self.indexer = BoxGrid(key_to_root)
+        # self.indexer = BoxGrid(key_to_root)
         self.indexer = BoxGrid(task_paths)
         self.robot = robot
-        
+
         if isinstance(env, ShelfEnv) and isinstance(robot, FetchArm):
             self.ompl_planner = OMPLPlanner(robot, data, rrtc_range=0.1)
         elif isinstance(env, CageEnv) and isinstance(robot, FetchArm):
             self.ompl_planner = OMPLPlanner(robot, data, rrtc_range=0.1)
         else:
-            self.ompl_planner = OMPLPlanner(robot, data)    
-        #self.ompl_planner = OMPLPlanner(robot, data)
-        #solved_key_list = list(solved_keys.keys())
+            self.ompl_planner = OMPLPlanner(robot, data)
+        # self.ompl_planner = OMPLPlanner(robot, data)
+        # solved_key_list = list(solved_keys.keys())
         solved_key_list = list(solved_keys)
 
         self.library = {}
@@ -193,18 +200,20 @@ class Library():
         iters = 0
         while len(self.library) <= N:
             iters += 1
-            
-            random_key = solved_key_list[np.random.randint(0, len(solved_key_list))]
+
+            random_key = solved_key_list[
+                np.random.randint(0, len(solved_key_list))
+            ]
             sample = [np.random.uniform(lo, hi) for lo, hi in random_key]
 
             recovered_key = self.indexer.query_point(sample)
             if recovered_key is None:
-                #print("Failed to find sample", flush=True)
+                # print("Failed to find sample", flush=True)
                 continue
-            #_, curr_goal = key_to_root[recovered_key]
+            # _, curr_goal = key_to_root[recovered_key]
             path = task_paths[recovered_key]
-            if path is None or len(path)==0:
-                #print("none path", flush=True)
+            if path is None or len(path) == 0:
+                # print("none path", flush=True)
                 continue
             curr_goal = path[-1]
 
@@ -215,15 +224,14 @@ class Library():
             #     num_waypoints=200,
             #     benchmark=True,
             # )
-            
+
             if tuple(sample) not in self.library:
-                #print(tuple(sample))
+                # print(tuple(sample))
                 self.library[tuple(sample)] = (curr_goal, path)
                 pbar_library.update(1)
 
-        
         self.lib_index = self.build_library_index(w_yaw=1.0)
-        #return self.lib_index
+        # return self.lib_index
 
     def build_library_index(self, z_tol=1e-6, w_yaw=1.0):
         """
@@ -247,17 +255,19 @@ class Library():
 
         for z0 in z_vals:
             mask = np.abs(keys[:, 2] - z0) <= z_tol
-            kz = keys[mask]                         # (Nz,4)
+            kz = keys[mask]  # (Nz,4)
             if kz.size == 0:
                 continue
 
             # Feature vector: [x, y, yaw_scale*cos(yaw), yaw_scale*sin(yaw)]
-            feats = np.column_stack([
-                kz[:, 0],
-                kz[:, 1],
-                yaw_scale * np.cos(kz[:, 3]),
-                yaw_scale * np.sin(kz[:, 3]),
-            ])
+            feats = np.column_stack(
+                [
+                    kz[:, 0],
+                    kz[:, 1],
+                    yaw_scale * np.cos(kz[:, 3]),
+                    yaw_scale * np.sin(kz[:, 3]),
+                ]
+            )
 
             trees[float(z0)] = cKDTree(feats)
             # store the exact tuple keys for retrieval (avoid float reconstruction issues)
@@ -322,7 +332,9 @@ class Library():
             return []
 
         ys = index["yaw_scale"]
-        q = np.array([x, y, ys * np.cos(yaw), ys * np.sin(yaw)], dtype=np.float64)
+        q = np.array(
+            [x, y, ys * np.cos(yaw), ys * np.sin(yaw)], dtype=np.float64
+        )
 
         # ---- Query k nearest ----
         # ensure n does not exceed available points
@@ -349,33 +361,34 @@ class Library():
         T = len(path)
         waypoint_valid = np.zeros(T, dtype=bool)
         for i, q in enumerate(path):
-            self.robot.set_joint_qpos(q) 
+            self.robot.set_joint_qpos(q)
             in_collision = self.robot.in_contact()
             waypoint_valid[i] = not in_collision
 
         return waypoint_valid
-    
+
     def collision_buffer(self, waypoint_valid, b=0):
-            if b <= 0:
-                return waypoint_valid.copy()
+        if b <= 0:
+            return waypoint_valid.copy()
 
-            T = waypoint_valid.shape[0]
-            buffered = waypoint_valid.copy()
+        T = waypoint_valid.shape[0]
+        buffered = waypoint_valid.copy()
 
-            coll = np.flatnonzero(~waypoint_valid)
-            if coll.size == 0:
-                return buffered
-
-            # mark everything within +/- b of each collision as collision
-            for i in coll:
-                lo = max(0, i - b)
-                hi = min(T, i + b + 1)   # +1 because slice end is exclusive
-                buffered[lo:hi] = False
-
+        coll = np.flatnonzero(~waypoint_valid)
+        if coll.size == 0:
             return buffered
 
-    def rewire_segments(self, path, validity_map, timeout=2.0, num_waypoints=20,
-                    max_repairs=20):
+        # mark everything within +/- b of each collision as collision
+        for i in coll:
+            lo = max(0, i - b)
+            hi = min(T, i + b + 1)  # +1 because slice end is exclusive
+            buffered[lo:hi] = False
+
+        return buffered
+
+    def rewire_segments(
+        self, path, validity_map, timeout=2.0, num_waypoints=20, max_repairs=20
+    ):
         path = np.asarray(path, dtype=np.float64)
         valid = np.asarray(validity_map, dtype=bool)
         out = path.copy()
@@ -394,7 +407,7 @@ class Library():
                 return out, True
 
             starts = np.flatnonzero(invalid & np.r_[True, ~invalid[:-1]])
-            ends   = np.flatnonzero(invalid & np.r_[~invalid[1:], True])
+            ends = np.flatnonzero(invalid & np.r_[~invalid[1:], True])
 
             rewired_any = False
 
@@ -421,7 +434,8 @@ class Library():
 
                 t0 = time.perf_counter()
                 rewired_segment, _, _ = self.ompl_planner.plan(
-                    start=q0, goal=q1,
+                    start=q0,
+                    goal=q1,
                     timeout=timeout,
                     num_waypoints=num_waypoints,
                     benchmark=True,
@@ -429,11 +443,15 @@ class Library():
                 t1 = time.perf_counter()
                 # tqdm.write(f"rewire [{prev}->{nxt}] plan_time={t1-t0:.2f}s invalid={n_invalid_before}")
 
-                if rewired_segment is None or len(rewired_segment)==0:
+                if rewired_segment is None or len(rewired_segment) == 0:
                     return None, False
 
                 rewired_segment = np.asarray(rewired_segment, dtype=np.float64)
-                mid = rewired_segment[1:-1] if rewired_segment.shape[0] >= 2 else rewired_segment
+                mid = (
+                    rewired_segment[1:-1]
+                    if rewired_segment.shape[0] >= 2
+                    else rewired_segment
+                )
 
                 a = prev + 1
                 out = np.vstack([out[:a], mid, out[nxt:]])
@@ -492,7 +510,7 @@ class Library():
                 benchmark=True,
             )
 
-        if rewired_segment is None or len(rewired_segment)==0:
+        if rewired_segment is None or len(rewired_segment) == 0:
             return None, False
 
         rewired_segment = np.asarray(rewired_segment, dtype=np.float64)
@@ -500,15 +518,9 @@ class Library():
         # ---- splice new tail ----
         # keep original path up to start_idx
         # append rewired segment excluding duplicate start
-        new_path = np.vstack([
-            path[:start_idx + 1],
-            rewired_segment[1:]
-        ])
+        new_path = np.vstack([path[: start_idx + 1], rewired_segment[1:]])
 
         return new_path, True
-        
-
-
 
     def solve(self, sample, k=5, timeout=3.0):
         nn_query_start = time.perf_counter()
@@ -518,12 +530,11 @@ class Library():
 
         recovered_key = self.indexer.query_point(sample)
         if recovered_key is None:
-            #raise RuntimeError("Failed to find key")
+            # raise RuntimeError("Failed to find key")
             return None, nn_time, False
-        #_, curr_goal = self.key_to_root[recovered_key]
+        # _, curr_goal = self.key_to_root[recovered_key]
         path = self.task_paths[recovered_key]
         curr_goal = path[-1]
-
 
         fix_start = time.perf_counter()
         fix_end = fix_start
@@ -531,7 +542,11 @@ class Library():
         final_path = None
         success = False
 
-        for neighbor_key, (neighbor_goal, neighbor_path), neighbor_dist in nn_results:
+        for (
+            neighbor_key,
+            (neighbor_goal, neighbor_path),
+            neighbor_dist,
+        ) in nn_results:
 
             # ---- Check global timeout BEFORE heavy work ----
             elapsed_fix = time.perf_counter() - fix_start
@@ -541,8 +556,7 @@ class Library():
 
             # 1) collision map + buffer
             waypoints_valid = self.collision_buffer(
-                self.check_path_collision(neighbor_path),
-                b=0
+                self.check_path_collision(neighbor_path), b=0
             )
 
             # ---- Remaining budget for this neighbor ----
@@ -555,8 +569,8 @@ class Library():
             rewired_path, ok = self.rewire_segments(
                 neighbor_path,
                 waypoints_valid,
-                timeout=min(2.0, remaining),   # cap by remaining budget
-                num_waypoints=20
+                timeout=min(2.0, remaining),  # cap by remaining budget
+                num_waypoints=20,
             )
 
             if not ok or rewired_path is None:
@@ -573,7 +587,7 @@ class Library():
                 rewired_path,
                 curr_goal,
                 n_wps=20,
-                timeout=min(1.0, remaining)   # cap by remaining budget
+                timeout=min(1.0, remaining),  # cap by remaining budget
             )
 
             if not ok or candidate_path is None:
@@ -593,7 +607,8 @@ class Library():
         return final_path, total_time, True
 
     def wrap_pi(self, a):
-        return (a + np.pi) % (2*np.pi) - np.pi
+        return (a + np.pi) % (2 * np.pi) - np.pi
+
 
 def evaluate_graph(
     args,
@@ -603,13 +618,19 @@ def evaluate_graph(
     task_set,
     task_paths,
     adaptations,
-    num_samples
+    num_samples,
 ):
     model, data = robot.model, robot.data
     home_qpos = robot.get_joint_qpos()
     ik_solver = get_ik_solver(robot, env_collision_geoms=env.collision_geoms)
-    solved_task_paths_keys = [k for k, path in task_paths.items() if path is not None and len(path) > 0]
-    solved_task_paths = {k: v for k, v in task_paths.items() if v is not None and len(v) > 0}
+    solved_task_paths_keys = [
+        k
+        for k, path in task_paths.items()
+        if path is not None and len(path) > 0
+    ]
+    solved_task_paths = {
+        k: v for k, v in task_paths.items() if v is not None and len(v) > 0
+    }
 
     print(f"Number of solved paths: {len(solved_task_paths_keys)}")
 
@@ -620,7 +641,7 @@ def evaluate_graph(
     # Setup grids for base library and adaptations
     indexers = []
     indexers.append(BoxGrid(task_set))
-    #indexers.append(BoxGrid(solved_task_paths))
+    # indexers.append(BoxGrid(solved_task_paths))
 
     rrtc_success = []
     rrtc_times = []
@@ -634,9 +655,8 @@ def evaluate_graph(
     adaptation_times = {}
     adaptation_lengths = {}
 
-
     lib_sizes = {}
-    lib_sizes['full'] = len(solved_task_paths_keys)
+    lib_sizes["full"] = len(solved_task_paths_keys)
 
     for adaptation in adaptations:
 
@@ -644,13 +664,10 @@ def evaluate_graph(
         adaptation_times[f"{adaptation}"] = []
         adaptation_lengths[f"{adaptation}"] = []
 
-        if adaptation == 'dmp' and args.env=="real" and args.robot == "ur10":
-            suffix = f"{args.ik}_{args.planner}_{adaptation}_100"
-        else:
-            suffix = f"{args.ik}_{args.planner}_{adaptation}_{args.n_neighbors}"
+        suffix = f"{args.ik}_{args.planner}_{adaptation}_{args.n_neighbors}"
         root_path = f"{folder}/root_paths_{suffix}.pkl"
         map_path = f"{folder}/key_to_root_{suffix}.pkl"
-        
+
         root_data = pickle.load(open(root_path, "rb"))
         map_data = pickle.load(open(map_path, "rb"))
         key_to_roots.append(map_data)
@@ -673,39 +690,47 @@ def evaluate_graph(
             raise ValueError(f"Invalid adaptation method: {adaptation}")
         adapters.append(adapter)
 
-
     rrtc_success = []
     rrtc_lengths = []
     rrtc_solve_times = []
 
     solved_keys = solved_task_paths_keys
 
-    #indexer = BoxGrid(key_to_root)
+    # indexer = BoxGrid(key_to_root)
     if isinstance(env, ShelfEnv) and isinstance(robot, FetchArm):
         ompl_planner = OMPLPlanner(robot, data, rrtc_range=0.1)
     elif isinstance(env, CageEnv) and isinstance(robot, FetchArm):
         ompl_planner = OMPLPlanner(robot, data, rrtc_range=0.1)
     else:
-        ompl_planner = OMPLPlanner(robot, data) 
-    #ompl_planner = OMPLPlanner(robot, data)
+        ompl_planner = OMPLPlanner(robot, data)
+    # ompl_planner = OMPLPlanner(robot, data)
 
     # Building library baseline with N = full library size
     N = len(solved_task_paths_keys)
     print("\n=== Building library ===")
-    library = Library(N, env, robot, home_qpos, key_to_roots[0], solved_keys, task_paths, data)
+    library = Library(
+        N,
+        env,
+        robot,
+        home_qpos,
+        key_to_roots[0],
+        solved_keys,
+        task_paths,
+        data,
+    )
 
     print(f"\n=== Evaluating baselines over {num_samples} samples===")
     num_tested = 0
-    
-    #pbar = tqdm(enumerate(solved_keys), total=len(solved_keys))
-    #for i, key in enumerate(solved_keys):
+
+    # pbar = tqdm(enumerate(solved_keys), total=len(solved_keys))
+    # for i, key in enumerate(solved_keys):
     pbar = tqdm(range(num_samples), total=num_samples)
-    while (num_tested < num_samples):
+    while num_tested < num_samples:
 
         key_ind = np.random.randint(0, len(solved_keys))
         key = solved_keys[key_ind]
 
-        sample = [] 
+        sample = []
         for lo, hi in key:
             x = np.random.uniform(lo, hi)
             x = np.nextafter(x, lo)
@@ -713,19 +738,23 @@ def evaluate_graph(
 
         env.move_cube_object(sample)
         recovered_key = indexers[0].query_point(sample)  # pick one
-        #_, key_goal = key_to_roots[0][recovered_key]
+        # _, key_goal = key_to_roots[0][recovered_key]
         key_goal = solved_task_paths[recovered_key][-1]
 
         for adaptation_ind, adaptation in enumerate(adaptations):
             adapt_start = time.perf_counter()
-            recovered_key_adapt = indexers[adaptation_ind+1].query_point(sample)
+            recovered_key_adapt = indexers[adaptation_ind + 1].query_point(
+                sample
+            )
             if recovered_key_adapt is None:
                 adaptation_success[adaptation].append(False)
                 adapt_end = time.perf_counter()
                 adaptation_times[adaptation].append(adapt_end - adapt_start)
                 adaptation_lengths[adaptation].append(np.nan)
                 continue
-            root_id, curr_goal = key_to_roots[adaptation_ind][recovered_key_adapt]
+            root_id, curr_goal = key_to_roots[adaptation_ind][
+                recovered_key_adapt
+            ]
 
             if key != recovered_key_adapt:
                 print(f"Original key: {key}")
@@ -733,12 +762,12 @@ def evaluate_graph(
                 print(f"{adaptation} recovered key: {recovered_key_adapt}")
                 input()
 
-            curr_root  = root_paths_list[adaptation_ind][root_id]
+            curr_root = root_paths_list[adaptation_ind][root_id]
             adapted_path = adapters[adaptation_ind].adapt(curr_root, curr_goal)
             adapt_end = time.perf_counter()
             adapt_time = adapt_end - adapt_start
 
-            curr_success = adapted_path is not None and len(adapted_path)>0
+            curr_success = adapted_path is not None and len(adapted_path) > 0
             adaptation_success[adaptation].append(curr_success)
             adaptation_times[adaptation].append(adapt_time)
             adaptation_lengths[adaptation].append(traj_len(adapted_path))
@@ -752,14 +781,14 @@ def evaluate_graph(
             num_waypoints=200,
             benchmark=True,
         )
-        if path is None or len(path)==0:
-            #print(f"Planning failure for key: {key}")
+        if path is None or len(path) == 0:
+            # print(f"Planning failure for key: {key}")
             rrtc_success.append(False)
             rrtc_lengths.append(np.nan)
         else:
             rrtc_success.append(True)
             rrtc_lengths.append(traj_len(path))
-        
+
         rrtc_solve_times.append(planning_time)
 
         # Library baseline
@@ -767,7 +796,7 @@ def evaluate_graph(
 
         library_success.append(lib_query_success)
         library_times.append(library_time)
-        
+
         if lib_query_success is True:
             library_lengths.append(traj_len(library_path))
         else:
@@ -784,62 +813,73 @@ def evaluate_graph(
     library_times = np.array(library_times)
     library_lengths = np.array(library_lengths)
 
-    rrtc_success_rate = np.mean(rrtc_success)*100
-    library_success_rate = np.mean(library_success)*100
-    
+    rrtc_success_rate = np.mean(rrtc_success) * 100
+    library_success_rate = np.mean(library_success) * 100
+
     rrtc_times_succ = rrtc_times[rrtc_success]
     library_times_succ = library_times[library_success]
 
     # ---- RRTConnect ----
     mean_rrtc_time_ms = np.nanmean(rrtc_times_succ) * 1000
-    std_rrtc_time_ms  = np.nanstd(rrtc_times_succ, ddof=1) * 1000
-    
+    std_rrtc_time_ms = np.nanstd(rrtc_times_succ, ddof=1) * 1000
+
     mean_rrtc_length = np.nanmean(rrtc_lengths)
-    std_rrtc_length  = np.nanstd(rrtc_lengths, ddof=1)
+    std_rrtc_length = np.nanstd(rrtc_lengths, ddof=1)
 
     # ---- Library baseline ----
     mean_library_time_ms = np.nanmean(library_times_succ) * 1000
-    std_library_time_ms  = np.nanstd(library_times_succ, ddof=1) * 1000
+    std_library_time_ms = np.nanstd(library_times_succ, ddof=1) * 1000
 
     mean_library_length = np.nanmean(library_lengths)
-    std_library_length  = np.nanstd(library_lengths, ddof=1)
+    std_library_length = np.nanstd(library_lengths, ddof=1)
 
     print("\n=== RRTConnect results ===")
     print(f"RRTConnect success rate: {rrtc_success_rate:.2f}%")
-    print(f"Mean RRTConnect time: {mean_rrtc_time_ms:.3f} ± {std_rrtc_time_ms:.3f} ms")
-    print(f"Mean RRTConnect length: {mean_rrtc_length:.6f} ± {std_rrtc_length:.6f}")
+    print(
+        f"Mean RRTConnect time: {mean_rrtc_time_ms:.3f} ± {std_rrtc_time_ms:.3f} ms"
+    )
+    print(
+        f"Mean RRTConnect length: {mean_rrtc_length:.6f} ± {std_rrtc_length:.6f}"
+    )
 
     print("\n=== Library baseline results ===")
     print(f"Library success rate: {library_success_rate:.2f}%")
-    print(f"Mean library time: {mean_library_time_ms:.3f} ± {std_library_time_ms:.3f} ms")
-    print(f"Mean library length: {mean_library_length:.6f} ± {std_library_length:.6f}")
-
+    print(
+        f"Mean library time: {mean_library_time_ms:.3f} ± {std_library_time_ms:.3f} ms"
+    )
+    print(
+        f"Mean library length: {mean_library_length:.6f} ± {std_library_length:.6f}"
+    )
 
     for adaptation in adaptations:
 
         times = np.asarray(adaptation_times[adaptation], dtype=float)
-        succ  = np.asarray(adaptation_success[adaptation], dtype=bool)
+        succ = np.asarray(adaptation_success[adaptation], dtype=bool)
 
         times_succ = times[succ]
 
         mean_time_ms = np.nanmean(times_succ) * 1000
-        std_time_ms  = np.nanstd(times_succ, ddof=1) * 1000
+        std_time_ms = np.nanstd(times_succ, ddof=1) * 1000
 
-        #times = adaptation_times[adaptation]
+        # times = adaptation_times[adaptation]
         lengths = adaptation_lengths[adaptation]
 
-        #mean_time_ms = np.nanmean(times) * 1000
-        #std_time_ms  = np.nanstd(times, ddof=1) * 1000
+        # mean_time_ms = np.nanmean(times) * 1000
+        # std_time_ms  = np.nanstd(times, ddof=1) * 1000
 
         mean_length = np.nanmean(lengths)
-        std_length  = np.nanstd(lengths, ddof=1)
+        std_length = np.nanstd(lengths, ddof=1)
 
         success_rate = np.mean(adaptation_success[adaptation]) * 100
 
         print(f"\n{adaptation} results")
         print(f"{adaptation} success rate: {success_rate:.2f}%")
-        print(f"{adaptation} mean time: {mean_time_ms:.3f} ± {std_time_ms:.3f} ms")
-        print(f"{adaptation} mean length: {mean_length:.6f} ± {std_length:.6f}")
+        print(
+            f"{adaptation} mean time: {mean_time_ms:.3f} ± {std_time_ms:.3f} ms"
+        )
+        print(
+            f"{adaptation} mean length: {mean_length:.6f} ± {std_length:.6f}"
+        )
 
     results_path = f"data/baseline_results_{args.robot}_{args.env}.npz"
     results = {
@@ -857,18 +897,17 @@ def evaluate_graph(
             "success": adaptation_success,
             "times": adaptation_times,
             "lengths": adaptation_lengths,
-        }
+        },
     }
 
     np.savez(results_path, results=results)
-
 
 
 def main(args):
     """Evaluate path quality and query time for graph"""
     folder = get_data_folder(args.env, args.robot)
     suffix = f"{args.ik}_{args.planner}_{args.adaptation}_{args.n_neighbors}"
-    
+
     # ---- output path for this run ----
     results_path = f"data/baseline_results_{args.robot}_{args.env}.npz"
 
@@ -880,7 +919,9 @@ def main(args):
 
     try:
         task_set = pickle.load(open(f"{folder}/task_set.pkl", "rb"))
-        joint_goal_set = pickle.load(open(f"{folder}/joint_goal_set_{args.ik}.pkl", "rb"))
+        joint_goal_set = pickle.load(
+            open(f"{folder}/joint_goal_set_{args.ik}.pkl", "rb")
+        )
         d_name = f"{folder}/task_paths_data_{args.ik}_{args.planner}.npy"
         data = np.load(d_name, allow_pickle=True)
         k_name = f"{folder}/task_paths_keys_{args.ik}_{args.planner}.pkl"
@@ -889,12 +930,13 @@ def main(args):
 
     except FileNotFoundError as e:
         print(e)
-        print(
-            f"One or more required files not found.")
+        print(f"One or more required files not found.")
         return
 
     IK_solved = sum(v is not None for v in joint_goal_set.values())
-    planner_solved = sum(v is not None and len(v)>1 for v in task_paths.values())
+    planner_solved = sum(
+        v is not None and len(v) > 1 for v in task_paths.values()
+    )
 
     print(f"Number of generated tasks: {len(task_set)}")
     print(f"Number of tasks solved by IK: {IK_solved}")
@@ -906,7 +948,7 @@ def main(args):
 
     root_exists = os.path.exists(root_path)
     map_exists = os.path.exists(map_path)
-    
+
     # if not root_exists or not map_exists:
     #     print("Compressed root paths "
     #         + f"with IK '{args.ik}', planner '{args.planner}', "
@@ -916,23 +958,22 @@ def main(args):
     #     return
 
     # Load environment and robot
-    #env, robot = load_env_and_robot(args.env, args.robot)
+    # env, robot = load_env_and_robot(args.env, args.robot)
 
     adaptations_found = []
-    for adaptation in ['grr', 'opt', 'dmp']:
-        if adaptation == 'dmp' and args.env=="real" and args.robot == "ur10":
-            suffix = f"{args.ik}_{args.planner}_{adaptation}_100"
-        else:
-            suffix = f"{args.ik}_{args.planner}_{adaptation}_{args.n_neighbors}"
+    for adaptation in ["grr", "opt", "dmp"]:
+        suffix = f"{args.ik}_{args.planner}_{adaptation}_{args.n_neighbors}"
         root_path = f"{folder}/root_paths_{suffix}.pkl"
         map_path = f"{folder}/key_to_root_{suffix}.pkl"
         root_exists = os.path.exists(root_path)
         map_exists = os.path.exists(map_path)
 
-        if root_exists and map_exists:   
+        if root_exists and map_exists:
             adaptations_found.append(adaptation)
-    if len(adaptations_found)==0:
-        raise FileNotFoundError(f"No adaptations found for problem: {args.robot} in {args.env}")        
+    if len(adaptations_found) == 0:
+        raise FileNotFoundError(
+            f"No adaptations found for problem: {args.robot} in {args.env}"
+        )
     print(f"Adaptations found: {adaptations_found}")
 
     env_name = args.env
@@ -972,15 +1013,24 @@ def main(args):
 
     # task_set_data = pickle.load(open(task_set_path, "rb"))
     # joint_goal_set_data = pickle.load(open(joint_goal_set_path, "rb"))
-    
+
     # print(f"Number of generated tasks: {len(task_set_data)}")
     # print(f"Number of solved IK: {len(joint_goal_set_data)}")
 
-    #planning_results_path = f"{folder}/task_paths_results_neighbor_RRTConnect.npy"
-    #planning_results = np.load(planning_results_path)
+    # planning_results_path = f"{folder}/task_paths_results_neighbor_RRTConnect.npy"
+    # planning_results = np.load(planning_results_path)
 
     num_samples = 1000
-    evaluate_graph(args, env, robot, folder, task_set, task_paths, adaptations_found, num_samples)
+    evaluate_graph(
+        args,
+        env,
+        robot,
+        folder,
+        task_set,
+        task_paths,
+        adaptations_found,
+        num_samples,
+    )
 
 
 def parse_arguments():
@@ -989,7 +1039,7 @@ def parse_arguments():
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument(
         "--env",
-        choices=["table", "box", "cage", "shelf", "free", "real"],
+        choices=["table", "box", "cage", "shelf", "free"],
         default="table",
     )
     parser.add_argument(
@@ -1009,7 +1059,7 @@ def parse_arguments():
     args = parser.parse_args()
     return args
 
-if __name__=="__main__":
-    args = parse_arguments()
 
+if __name__ == "__main__":
+    args = parse_arguments()
     main(args)
