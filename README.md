@@ -63,41 +63,49 @@ Here is a comparison among three methods in both real world and simulation. Over
 
 <br>
 
-<div style="display:flex; justify-content:center; gap:5px; flex-wrap:wrap; text-align:center;">
-  <div style="display:inline-block; text-align:center;">
-    <img src="doc/li.gif" width="230"/><br>
-    LI adaptation
-  </div>
-  <div style="display:inline-block; text-align:center;">
-    <img src="doc/dmp.gif" width="230"/><br>
-    DMP adaptation
-  </div>
-  <div style="display:inline-block; text-align:center;">
-    <img src="doc/sto.gif" width="230"/><br>
-    STO adaptation
-  </div>
-</div>
+<table align="center">
+  <tr>
+    <td align="center">
+      <img src="doc/li.gif" width="300"><br>
+      LI adaptation
+    </td>
+    <td align="center">
+      <img src="doc/dmp.gif" width="300"><br>
+      DMP adaptation
+    </td>
+    <td align="center">
+      <img src="doc/sto.gif" width="300"><br>
+      STO adaptation
+    </td>
+  </tr>
+</table>
 
 <br>
 
-<div style="display:flex; justify-content:center; gap:10px; flex-wrap:wrap; text-align:center;">
-  <div style="display:inline-block; text-align:center;">
-    <img src="doc/root_sim.gif" width="300"/><br>
-    Root Path
-  </div>
-  <div style="display:inline-block; text-align:center;">
-    <img src="doc/li_sim.gif" width="300"/><br>
-    LI adaptation
-  </div>
-  <div style="display:inline-block; text-align:center;">
-    <img src="doc/dmp_sim.gif" width="300"/><br>
-    DMP adaptation
-  </div>
-  <div style="display:inline-block; text-align:center;">
-    <img src="doc/sto_sim.gif" width="300"/><br>
-    STO adaptation
-  </div>
-</div>
+<table align="center">
+  <tr>
+    <td align="center">
+      <img src="doc/root_sim.gif" width="300"><br>
+      Root Path
+    </td>
+    <td align="center">
+      <img src="doc/li_sim.gif" width="300"><br>
+      LI adaptation
+    </td>
+  </tr>
+</table>
+<table align="center">
+  <tr>
+    <td align="center">
+      <img src="doc/dmp_sim.gif" width="300"><br>
+      DMP adaptation
+    </td>
+    <td align="center">
+      <img src="doc/sto_sim.gif" width="300"><br>
+      STO adaptation
+    </td>
+  </tr>
+</table>
 
 ### Benchmarking
 
