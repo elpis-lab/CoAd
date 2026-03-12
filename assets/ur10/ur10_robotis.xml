@@ -61,6 +61,7 @@
     <mesh name="gripper_l2" file="ur10/robotis_rh_p12_rn/visual/l2.stl" scale="0.001 0.001 0.001"/>
     <mesh name="gripper_r1" file="ur10/robotis_rh_p12_rn/visual/r1.stl" scale="0.001 0.001 0.001"/>
     <mesh name="gripper_r2" file="ur10/robotis_rh_p12_rn/visual/r2.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="camera" file="ur10/realsense2/visual/d435.obj"/>
 
     <texture name="base_texture" type="2d" file="ur10/ur10/visual/base_color.png"/>
     <texture name="shoulder_texture" type="2d" file="ur10/ur10/visual/shoulder_color.png"/>
@@ -69,7 +70,8 @@
     <texture name="wrist1_texture" type="2d" file="ur10/ur10/visual/wrist1_color.png"/>
     <texture name="wrist2_texture" type="2d" file="ur10/ur10/visual/wrist2_color.png"/>
     <texture name="wrist3_texture" type="2d" file="ur10/ur10/visual/wrist3_color.png"/>
-
+    <texture name="camera_texture" type="2d" file="ur10/realsense2/visual/d435_color.png"/>
+  
     <material class="ur10" name="base_visual" texture="base_texture" />
     <material class="ur10" name="shoulder_visual" texture="shoulder_texture" />
     <material class="ur10" name="upperarm_visual" texture="upperarm_texture" />
@@ -77,6 +79,7 @@
     <material class="ur10" name="wrist1_visual" texture="wrist1_texture" />
     <material class="ur10" name="wrist2_visual" texture="wrist2_texture" />
     <material class="ur10" name="wrist3_visual" texture="wrist3_texture" />
+    <material class="ur10" name="camera_visual" texture="camera_texture" />
 
     <material class="ur10" name="black" rgba="0.2 0.2 0.2 1"/>
     <material class="ur10" name="gold" rgba="1 0.843 0 1"/>
@@ -137,6 +140,12 @@
                       <geom name="gripper_base_visual" mesh="gripper_base" material="black" class="visual"/>
                       <geom name="gripper_base_collision" class="gripper_collision" type="box" size="0.026 0.04 0.064" rgba="0.2 0.2 0.2 1"/>
                       <site name="attachment_site" pos="0 0 0.145" rgba="1 0 0 0" group="1"/>
+
+                      <body name="camera" pos="0.0425 0.0 0.06" quat="0.7071 0 0 0.7071">
+                        <inertial pos="0 0 0" mass="0.05" diaginertia="0.0001 0.0001 0.0001"/>
+                        <geom name="camera_visual" mesh="camera" material="camera_visual" class="visual"/>
+                        <geom name="camera_collision" type="box" size="0.055 0.0125 0.0125" pos="0 0 -0.012" class="collision"/>
+                      </body>
 
                       <body name="rh_p12_rn_r1" pos="0 0.008 0.058">
                         <inertial pos="0 0.034 0.004" mass="0.068" diaginertia="0.0001 0.0001 0.0001"/>

@@ -3,7 +3,15 @@ import random
 import numpy as np
 import argparse
 
-from plan_load.env import MujocoEnv, TableEnv, BoxEnv, CageEnv, ShelfEnv, FreeEnv, RealEnv
+from plan_load.env import (
+    MujocoEnv,
+    TableEnv,
+    BoxEnv,
+    CageEnv,
+    ShelfEnv,
+    FreeEnv,
+    RealEnv,
+)
 from plan_load.robot import MujocoRobot, Panda, UR10, FetchArm
 
 # for better printing
@@ -41,7 +49,7 @@ def get_data_folder(env_name: str, robot_name: str) -> str:
 
 
 def load_env_and_robot(
-    env_name: str, robot_name: str, visualize: bool = False
+    env_name: str, robot_name: str, visualize: bool = True
 ) -> tuple[MujocoEnv, MujocoRobot]:
     # Build scene for given environment
     if env_name == "table":

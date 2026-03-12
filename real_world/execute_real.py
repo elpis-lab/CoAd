@@ -44,7 +44,7 @@ def load_library_and_adapter(
     task_paths = {key: data for key, data in zip(keys, data)}
 
     # Load environment and robot
-    env, robot = load_env_and_robot(env_name, robot_name, True)
+    env, robot = load_env_and_robot(env_name, robot_name)
     ik_solver = get_ik_solver(robot, env_collision_geoms=env.collision_geoms)
 
     # Get adapter
