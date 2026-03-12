@@ -17,7 +17,7 @@ from plan_load.adaptation import LinearAdapter, GRRAdapter
 from plan_load.adaptation import DMPAdapter, TrajOptAdapter
 
 # from plan_load.task_space import deep_tuple
-from experiments.evaluate import traj_len
+from experiments.visualize_baselines import traj_len
 from plan_load.utils import set_seed, load_env_and_robot, get_data_folder
 from plan_load.planning import OMPLPlanner, euclidean_path_length
 
