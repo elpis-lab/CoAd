@@ -12,15 +12,14 @@ robots=(
     fetch
 )
 envs=(
-    box
-    #cage
-    #table
-    #shelf
+    table
+    cage
+    shelf
 )
 adaptations=(
     grr
     opt
-    #dmp
+    dmp
 )
 adaptation="opt"
 ik="neighbor"

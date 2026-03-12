@@ -7,12 +7,11 @@ script_dir="$root_dir/plan_load"
 start_time=$(date +%s)
 
 robots=(
-    panda
+    #panda
     #ur10
     fetch
 )
 envs=(
-    #box
     cage
     table
     shelf
@@ -20,7 +19,7 @@ envs=(
 adaptations=(
     grr
     opt
-    #dmp
+    dmp
 )
 ik="neighbor"
 planner="RRTConnect"

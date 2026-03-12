@@ -1,5 +1,6 @@
 import sys
 import os
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import time
@@ -32,6 +33,7 @@ def traj_len(traj):
     # Euclidean norms of each segment
     segment_lengths = np.linalg.norm(diffs, axis=1)
     return np.sum(segment_lengths)
+
 
 class BoxGrid:
     def __init__(self, keys_to_root, tol=1e-12):
@@ -74,7 +76,12 @@ class BoxGrid:
         self.index = {}
 
         for bin_idx, key in enumerate(self.keys_list):
-            x_min, y_min, z_val, yaw_min = key[0][0], key[1][0], key[2][0], key[3][0]
+            x_min, y_min, z_val, yaw_min = (
+                key[0][0],
+                key[1][0],
+                key[2][0],
+                key[3][0],
+            )
 
             ix = self._x_to_ix[float(x_min)]
             iy = self._y_to_iy[float(y_min)]
@@ -154,7 +161,9 @@ class Library:
         pbar_library = tqdm(total=N, desc="Building library", leave=True)
 
         while len(self.library) < N:
-            random_key = solved_key_list[np.random.randint(0, len(solved_key_list))]
+            random_key = solved_key_list[
+                np.random.randint(0, len(solved_key_list))
+            ]
             sample = [np.random.uniform(lo, hi) for lo, hi in random_key]
 
             recovered_key = self.indexer.query_point(sample)
@@ -191,12 +200,14 @@ class Library:
             if kz.size == 0:
                 continue
 
-            feats = np.column_stack([
-                kz[:, 0],
-                kz[:, 1],
-                yaw_scale * np.cos(kz[:, 3]),
-                yaw_scale * np.sin(kz[:, 3]),
-            ])
+            feats = np.column_stack(
+                [
+                    kz[:, 0],
+                    kz[:, 1],
+                    yaw_scale * np.cos(kz[:, 3]),
+                    yaw_scale * np.sin(kz[:, 3]),
+                ]
+            )
 
             trees[float(z0)] = cKDTree(feats)
             key_lists[float(z0)] = [tuple(row) for row in kz]
@@ -224,7 +235,9 @@ class Library:
             return []
 
         ys = index["yaw_scale"]
-        q = np.array([x, y, ys * np.cos(yaw), ys * np.sin(yaw)], dtype=np.float64)
+        q = np.array(
+            [x, y, ys * np.cos(yaw), ys * np.sin(yaw)], dtype=np.float64
+        )
 
         num_points = len(index["key_lists"][z0])
         k = min(n, num_points)
@@ -269,7 +282,9 @@ class Library:
 
         return buffered
 
-    def rewire_segments(self, path, validity_map, timeout=2.0, num_waypoints=20, max_repairs=20):
+    def rewire_segments(
+        self, path, validity_map, timeout=2.0, num_waypoints=20, max_repairs=20
+    ):
         path = np.asarray(path, dtype=np.float64)
         valid = np.asarray(validity_map, dtype=bool)
         out = path.copy()
@@ -322,7 +337,11 @@ class Library:
                     return None, False
 
                 rewired_segment = np.asarray(rewired_segment, dtype=np.float64)
-                mid = rewired_segment[1:-1] if rewired_segment.shape[0] >= 2 else rewired_segment
+                mid = (
+                    rewired_segment[1:-1]
+                    if rewired_segment.shape[0] >= 2
+                    else rewired_segment
+                )
 
                 a = prev + 1
                 out = np.vstack([out[:a], mid, out[nxt:]])
@@ -380,10 +399,7 @@ class Library:
 
         rewired_segment = np.asarray(rewired_segment, dtype=np.float64)
 
-        new_path = np.vstack([
-            path[:start_idx + 1],
-            rewired_segment[1:]
-        ])
+        new_path = np.vstack([path[: start_idx + 1], rewired_segment[1:]])
 
         return new_path, True
 
@@ -404,15 +420,18 @@ class Library:
         final_path = None
         success = False
 
-        for neighbor_key, (neighbor_goal, neighbor_path), neighbor_dist in nn_results:
+        for (
+            neighbor_key,
+            (neighbor_goal, neighbor_path),
+            neighbor_dist,
+        ) in nn_results:
             elapsed_fix = time.perf_counter() - fix_start
             if elapsed_fix > timeout:
                 total_time = nn_time + elapsed_fix
                 return None, total_time, False
 
             waypoints_valid = self.collision_buffer(
-                self.check_path_collision(neighbor_path),
-                b=0
+                self.check_path_collision(neighbor_path), b=0
             )
 
             remaining = timeout - (time.perf_counter() - fix_start)
@@ -424,7 +443,7 @@ class Library:
                 neighbor_path,
                 waypoints_valid,
                 timeout=min(2.0, remaining),
-                num_waypoints=20
+                num_waypoints=20,
             )
 
             if not ok or rewired_path is None:
@@ -436,10 +455,7 @@ class Library:
                 return None, total_time, False
 
             candidate_path, ok = self.rewire_to_goal(
-                rewired_path,
-                curr_goal,
-                n_wps=20,
-                timeout=min(1.0, remaining)
+                rewired_path, curr_goal, n_wps=20, timeout=min(1.0, remaining)
             )
 
             if not ok or candidate_path is None:
@@ -487,7 +503,9 @@ def build_env_and_robot(env_name, robot_name, visualize=True):
     return env, robot
 
 
-def load_adapter_data(folder, ik, planner, adaptation, n_neighbors, env_name, robot_name):
+def load_adapter_data(
+    folder, ik, planner, adaptation, n_neighbors, env_name, robot_name
+):
     if adaptation == "dmp" and env_name == "real" and robot_name == "ur10":
         suffix = f"{ik}_{planner}_{adaptation}_100"
     else:
@@ -537,7 +555,9 @@ def sample_pose_supported_by_all(
     adapter_indexers,
 ):
     while True:
-        key = solved_task_paths_keys[np.random.randint(0, len(solved_task_paths_keys))]
+        key = solved_task_paths_keys[
+            np.random.randint(0, len(solved_task_paths_keys))
+        ]
         sample = [float(np.random.uniform(lo, hi)) for lo, hi in key]
 
         base_key = base_indexer.query_point(sample)
@@ -573,8 +593,7 @@ def main(args):
     task_paths = {key: datum for key, datum in zip(keys, data)}
 
     solved_task_paths = {
-        k: v for k, v in task_paths.items()
-        if v is not None and len(v) > 0
+        k: v for k, v in task_paths.items() if v is not None and len(v) > 0
     }
     solved_task_paths_keys = list(solved_task_paths.keys())
 
@@ -628,7 +647,9 @@ def main(args):
         key_to_roots[method_name] = map_data
         adapter_indexers[method_name] = BoxGrid(map_data)
 
-        print(f"{method_name} ({spec['file_tag']} files): {len(root_data)} root paths")
+        print(
+            f"{method_name} ({spec['file_tag']} files): {len(root_data)} root paths"
+        )
     base_indexer = BoxGrid(solved_task_paths)
 
     if isinstance(env, ShelfEnv) and isinstance(robot, FetchArm):
@@ -682,7 +703,9 @@ def main(args):
             print("\nLocked object pose:")
             print(np.array(locked_sample))
 
-            key_goal = np.asarray(solved_task_paths[locked_base_key][-1], dtype=float)
+            key_goal = np.asarray(
+                solved_task_paths[locked_base_key][-1], dtype=float
+            )
 
             print("\nShowing goal configuration for this object pose...")
             robot.set_joint_qpos(home_qpos)
@@ -702,12 +725,29 @@ def main(args):
                 sync_pause(robot, 0.3)
                 continue
 
-            method_order = ["coad_full", "linear", "trajopt", "dmp", "rrtconnect", "library"]
-            #method_order = ["dmp"]
-            method_order = ["dmp", "dmp", "coad_full", "linear", "trajopt", "rrtconnect", "library"]
+            method_order = [
+                "coad_full",
+                "linear",
+                "trajopt",
+                "dmp",
+                "rrtconnect",
+                "library",
+            ]
+            # method_order = ["dmp"]
+            method_order = [
+                "dmp",
+                "dmp",
+                "coad_full",
+                "linear",
+                "trajopt",
+                "rrtconnect",
+                "library",
+            ]
 
             for method in method_order:
-                print(f"\n==================== {method.upper()} ====================")
+                print(
+                    f"\n==================== {method.upper()} ===================="
+                )
 
                 env.move_cube_object(locked_sample)
                 robot.set_joint_qpos(home_qpos)
@@ -718,7 +758,9 @@ def main(args):
                 success = False
 
                 if method == "coad_full":
-                    recovered_key = coad_full_indexer.query_point(locked_sample)
+                    recovered_key = coad_full_indexer.query_point(
+                        locked_sample
+                    )
                     if recovered_key is None:
                         path = None
                         solve_time = 0.0
@@ -740,7 +782,9 @@ def main(args):
                     curr_root = root_paths[method][root_id]
 
                     t0 = time.perf_counter()
-                    path = method_specs[method]["adapter"].adapt(curr_root, curr_goal)
+                    path = method_specs[method]["adapter"].adapt(
+                        curr_root, curr_goal
+                    )
                     t1 = time.perf_counter()
 
                     solve_time = t1 - t0
@@ -762,7 +806,11 @@ def main(args):
                     )
                     t1 = time.perf_counter()
 
-                    solve_time = planning_time if planning_time is not None else (t1 - t0)
+                    solve_time = (
+                        planning_time
+                        if planning_time is not None
+                        else (t1 - t0)
+                    )
                     success = path is not None and len(path) > 0
                     print(f"goal q: {key_goal}")
 
@@ -775,8 +823,12 @@ def main(args):
                     )
                     t1 = time.perf_counter()
 
-                    solve_time = library_time if library_time is not None else (t1 - t0)
-                    success = lib_success and path is not None and len(path) > 0
+                    solve_time = (
+                        library_time if library_time is not None else (t1 - t0)
+                    )
+                    success = (
+                        lib_success and path is not None and len(path) > 0
+                    )
 
                     print(f"goal q: {key_goal}")
 
@@ -801,7 +853,9 @@ def main(args):
                 sync_pause(robot, 0.5)
 
             print("\nAll methods completed for this locked pose.")
-            again = input("Press Enter to sample a new pose, or type anything to quit: ").strip()
+            again = input(
+                "Press Enter to sample a new pose, or type anything to quit: "
+            ).strip()
             if again != "":
                 break
 

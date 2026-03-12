@@ -1,44 +1,57 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PYTHON=python3
-SCRIPT="experiments/benchmark_baselines.py"
+root_dir="$(dirname "$(realpath "$0")")/.."
+script_path="$root_dir/experiments/benchmark_baselines.py"
 
-robots=(panda fetch)
-envs=(table cage shelf)
+# Start timer
+start_time=$(date +%s)
+
+robots=(
+    panda
+    fetch
+)
+envs=(
+    table
+    cage
+    shelf
+)
+
 ik="neighbor"
 planner="RRTConnect"
 n_neighbors=1000
+overwrite_results=true
 
-OVERWRITE=false
 if [[ "${1:-}" == "--overwrite" ]]; then
-  OVERWRITE=true
+  overwrite_results=true
 fi
 
-for r in "${robots[@]}"; do
-  for e in "${envs[@]}"; do
+for robot in "${robots[@]}"; do
+  for env in "${envs[@]}"; do
+    echo "=== Running baseline: ${robot} in ${env} ==="
 
-    out="data/baseline_results_${r}_${e}.npz"
-
-    if [[ -f "$out" && "$OVERWRITE" == "false" ]]; then
-      echo "[Skip] $out exists. (Pass --overwrite to re-run)"
-      continue
+    if [ "$overwrite_results" = true ]; then
+      python3 "$script_path" \
+        --robot "$robot" \
+        --env "$env" \
+        --ik "$ik" \
+        --planner "$planner" \
+        --n_neighbors "$n_neighbors" \
+        --overwrite
+    else
+      python3 "$script_path" \
+        --robot "$robot" \
+        --env "$env" \
+        --ik "$ik" \
+        --planner "$planner" \
+        --n_neighbors "$n_neighbors"
     fi
 
-    echo "Running: robot=$r env=$e -> $out"
-    cmd=(
-      $PYTHON "$SCRIPT"
-      --robot "$r"
-      --env "$e"
-      --ik "$ik"
-      --planner "$planner"
-      --n_neighbors "$n_neighbors"
-    )
-
-    if [[ "$OVERWRITE" == "true" ]]; then
-      cmd+=(--overwrite)
-    fi
-
-    "${cmd[@]}"
+    echo "Finished: robot=${robot}, env=${env}"
   done
 done
+
+end_time=$(date +%s)
+elapsed=$(( end_time - start_time ))
+printf "=== All baseline jobs completed in %02d:%02d:%02d ===\n" \
+  $((elapsed/3600)) $((elapsed%3600/60)) $((elapsed%60))
