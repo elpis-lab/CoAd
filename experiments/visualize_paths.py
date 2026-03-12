@@ -11,15 +11,15 @@ import numpy as np
 from tqdm import tqdm
 from scipy.spatial import cKDTree
 
-from plan_load.env import MujocoEnv
-from plan_load.robot import MujocoRobot
-from plan_load.mink_ik import get_ik_solver
-from plan_load.adaptation import LinearAdapter, DMPAdapter, TrajOptAdapter
-from plan_load.planning import OMPLPlanner
-from plan_load.utils import get_data_folder
+from coad.env import MujocoEnv
+from coad.robot import MujocoRobot
+from coad.mink_ik import get_ik_solver
+from coad.adaptation import LinearAdapter, DMPAdapter, TrajOptAdapter
+from coad.planning import OMPLPlanner
+from coad.utils import get_data_folder
 
-from plan_load.env import FreeEnv, CageEnv, BoxEnv, TableEnv, ShelfEnv
-from plan_load.robot import Panda, UR10, FetchArm
+from coad.env import FreeEnv, CageEnv, BoxEnv, TableEnv, ShelfEnv
+from coad.robot import Panda, UR10, FetchArm
 
 
 def traj_len(traj):

@@ -7,10 +7,10 @@ import numpy as np
 import pickle
 from tqdm import tqdm
 
-from plan_load.utils import set_seed, load_env_and_robot, get_data_folder
-from plan_load.env import MujocoEnv
-from plan_load.robot import MujocoRobot
-from plan_load.planning import OMPLPlanner, euclidean_path_length
+from coad.utils import set_seed, load_env_and_robot, get_data_folder
+from coad.env import MujocoEnv
+from coad.robot import MujocoRobot
+from coad.planning import OMPLPlanner, euclidean_path_length
 
 
 def solve_batch(

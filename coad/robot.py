@@ -6,9 +6,9 @@ import numpy as np
 import mujoco
 import mujoco.viewer
 
-from plan_load.mujoco_utils import joint_names_to_joint_ids
-from plan_load.mujoco_utils import joints_to_limits, joints_to_qpos_dof_ids
-from plan_load.mujoco_utils import get_geoms_from_group, geoms_in_contact
+from coad.mujoco_utils import joint_names_to_joint_ids
+from coad.mujoco_utils import joints_to_limits, joints_to_qpos_dof_ids
+from coad.mujoco_utils import get_geoms_from_group, geoms_in_contact
 
 
 class MujocoRobot:

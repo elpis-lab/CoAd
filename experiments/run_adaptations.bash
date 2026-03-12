@@ -1,7 +1,7 @@
 \#!/usr/bin/env bash
 set -euo pipefail
 root_dir="$(dirname "$(realpath "$0")")/.."
-script_dir="$root_dir/plan_load"
+script_dir="$root_dir/coad"
 
 # Start timer
 start_time=$(date +%s)

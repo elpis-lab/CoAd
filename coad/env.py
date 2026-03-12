@@ -9,13 +9,13 @@ import re
 from pathlib import Path
 
 from geometry.pose import wrap_to_pi
-from plan_load.task_generation import find_yaw_iTSR_set, find_iTSR_set
-from plan_load.task_generation import (
+from coad.task_generation import find_yaw_iTSR_set, find_iTSR_set
+from coad.task_generation import (
     panda_TSR_parameters,
     fetch_TSR_parameters,
     ur10_TSR_parameters,
 )
-from plan_load.robot import MujocoRobot, Panda, UR10, FetchArm
+from coad.robot import MujocoRobot, Panda, UR10, FetchArm
 
 
 class MujocoEnv:
@@ -163,34 +163,36 @@ class MujocoEnv:
             body_blocks.append(frag)
 
         curr_xml = f"""
-    <mujoco model="test_world">
-        <include file="{self.base_xml}"/>
+        <mujoco model="test_world">
+            <include file="{self.base_xml}"/>
 
-        <asset>
-    """
+            <asset>
+        """
         for a in asset_blocks:
             # strip outer <asset> wrapper
             inner = a.replace("<asset>", "").replace("</asset>", "")
             curr_xml += inner + "\n"
 
         curr_xml += """
-        </asset>
+            </asset>
 
-        <worldbody>
-    """
+            <worldbody>
+        """
 
         for b in body_blocks:
             curr_xml += b + "\n"
 
         curr_xml += """
-        </worldbody>
-    </mujoco>
-    """
+            </worldbody>
+        </mujoco>
+        """
 
         with open(xml_path, "w") as f:
             f.write(curr_xml)
-
         model = mujoco.MjModel.from_xml_path(xml_path)
+        os.remove(xml_path)
+        # model = mujoco.MjModel.from_xml_string(curr_xml)
+
         data = mujoco.MjData(model)
         return model, data
 

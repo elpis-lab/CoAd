@@ -6,8 +6,8 @@ import numpy as np
 import mujoco
 import mink
 
-from plan_load.mujoco_utils import sample_qpos
-from plan_load.robot import MujocoRobot, Panda, UR10, FetchArm
+from coad.mujoco_utils import sample_qpos
+from coad.robot import MujocoRobot, Panda, UR10, FetchArm
 
 
 def get_ik_solver(
@@ -281,16 +281,17 @@ class UR10IK(IK):
 
 class FetchArmIK(IK):
     """Fetch (arm only) IK class"""
+
     GRIPPER = [
         "gripper_link_c",
         "r_gripper_finger_link_c",
-        "l_gripper_finger_link_c"
+        "l_gripper_finger_link_c",
     ]
 
     ARM = [
         "torso_lift_link_c",
-        #"head_pan_link_c",
-        #"head_tilt_link_c",
+        # "head_pan_link_c",
+        # "head_tilt_link_c",
         "shoulder_pan_link_c",
         "shoulder_lift_link_c",
         "upperarm_roll_link_c",
@@ -299,11 +300,11 @@ class FetchArmIK(IK):
         "wrist_flex_link_c",
         "wrist_roll_link_c",
         "bellows_link_c",
-        #"estop_link_c",
-        #"laser_link_c",
-        "torso_fixed_link_c"
+        # "estop_link_c",
+        # "laser_link_c",
+        "torso_fixed_link_c",
     ]
-    
+
     def __init__(
         self,
         robot: FetchArm,
@@ -320,8 +321,6 @@ class FetchArmIK(IK):
         # Velocity limits
         max_velocities = {name: np.pi for name in robot.joint_names}
         super().__init__(robot, solver, collision_pairs, max_velocities)
-
-
 
 
 if __name__ == "__main__":
@@ -345,16 +344,16 @@ if __name__ == "__main__":
     # robot = FetchArm(model, visualize=True)
     # robot.teleport_base(np.array([0.0, 0.0, 0.005]))
     # robotIK = FetchArmIK(robot)
-    
+
     # test IK
     target_pos = [0.75, 0, 0.5]
-    #target_quat = [0.7071, 0, 0.7071, 0]
+    # target_quat = [0.7071, 0, 0.7071, 0]
     target_quat = [0, 0, 1, 0]
     ik_target = np.array(target_pos + target_quat)
     reached, q_ik = robotIK.solve(ik_target)
-    
+
     print(reached, q_ik)
-    
+
     if q_ik is not None:
         print(f"IK reached: {reached}")
         robot.set_joint_qpos(q_ik)

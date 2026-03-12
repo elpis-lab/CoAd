@@ -9,9 +9,7 @@ import ompl.geometric as og
 import ompl.util as ou
 
 import mujoco
-from plan_load.robot import MujocoRobot
-
-
+from coad.robot import MujocoRobot
 
 
 class OMPLPlanner:
@@ -21,7 +19,12 @@ class OMPLPlanner:
     """
 
     def __init__(
-        self, robot: MujocoRobot, data=None, planner="RRTConnect", rrtc_range=None, log=False
+        self,
+        robot: MujocoRobot,
+        data=None,
+        planner="RRTConnect",
+        rrtc_range=None,
+        log=False,
     ):
         """Initialize Planner"""
         # Mujoco Robot with its model and data
@@ -46,8 +49,6 @@ class OMPLPlanner:
         self.planner = self.ss.getPlanner()
         if not log:
             ou.setLogLevel(ou.LOG_ERROR)
-
-        
 
     def set_up_ompl(self):
         """Setup OMPL planner"""
@@ -81,7 +82,7 @@ class OMPLPlanner:
             planner.setRange(self.range * extent)
 
         # Setting up OMPL planner
-        #ss.setPlanner(getattr(og, self.planner_name)(si))
+        # ss.setPlanner(getattr(og, self.planner_name)(si))
         ss.setPlanner(planner)
         return ss, si
 
@@ -95,7 +96,7 @@ class OMPLPlanner:
         benchmark=False,
         log=False,
     ):
-        
+
         # Set up start and goal states
         start_state = ob.State(self.si.getStateSpace())
         goal_state = ob.State(self.si.getStateSpace())

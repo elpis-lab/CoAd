@@ -7,7 +7,7 @@ import numpy as np
 import pickle
 from tqdm import tqdm
 
-from plan_load.utils import set_seed, load_env_and_robot, get_data_folder
+from coad.utils import set_seed, load_env_and_robot, get_data_folder
 
 
 def main(args):
@@ -41,7 +41,9 @@ def parse_arguments():
     # envs
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument(
-        "--env", choices=["table", "box", "cage", "shelf", "free", "real"], default="table"
+        "--env",
+        choices=["table", "box", "cage", "shelf", "free", "real"],
+        default="table",
     )
     parser.add_argument(
         "--robot", choices=["panda", "ur10", "fetch"], default="panda"

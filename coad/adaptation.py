@@ -3,12 +3,12 @@ import time
 import numpy as np
 from dataclasses import dataclass
 
-from plan_load.robot import MujocoRobot
-from plan_load.mink_ik import IK
+from coad.robot import MujocoRobot
+from coad.mink_ik import IK
 
-from plan_load.adaptation_grr import segment_continuity_check
-from plan_load.adaptation_dmp import DMPDiscete, DMP
-from plan_load.adaptation_opt import TrajOpt
+from coad.adaptation_grr import segment_continuity_check
+from coad.adaptation_dmp import DMPDiscete, DMP
+from coad.adaptation_opt import TrajOpt
 
 
 class Adapter:

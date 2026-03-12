@@ -3,7 +3,7 @@ import random
 import numpy as np
 import argparse
 
-from plan_load.env import (
+from coad.env import (
     MujocoEnv,
     TableEnv,
     BoxEnv,
@@ -12,7 +12,7 @@ from plan_load.env import (
     FreeEnv,
     RealEnv,
 )
-from plan_load.robot import MujocoRobot, Panda, UR10, FetchArm
+from coad.robot import MujocoRobot, Panda, UR10, FetchArm
 
 # for better printing
 warnings.filterwarnings("ignore", category=FutureWarning)

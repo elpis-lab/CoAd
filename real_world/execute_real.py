@@ -5,14 +5,14 @@ import time
 import numpy as np
 import pickle
 
-from plan_load.env import MujocoEnv, RealEnv
-from plan_load.robot import MujocoRobot, UR10
-from plan_load.mink_ik import get_ik_solver
+from coad.env import MujocoEnv, RealEnv
+from coad.robot import MujocoRobot, UR10
+from coad.mink_ik import get_ik_solver
 
-from plan_load.adaptation import LinearAdapter, GRRAdapter
-from plan_load.adaptation import DMPAdapter, TrajOptAdapter
-from plan_load.utils import set_seed, load_env_and_robot, get_data_folder
-from plan_load.planning import OMPLPlanner
+from coad.adaptation import LinearAdapter, GRRAdapter
+from coad.adaptation import DMPAdapter, TrajOptAdapter
+from coad.utils import set_seed, load_env_and_robot, get_data_folder
+from coad.planning import OMPLPlanner
 from geometry.trajectory import Trajectory, SplineTrajectory, TOPPRATrajectory
 
 from real_world.physical_robot import PhysicalUR10

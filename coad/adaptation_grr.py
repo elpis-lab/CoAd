@@ -13,8 +13,8 @@ https://ieeexplore.ieee.org/document/10801917
 import numpy as np
 from collections import deque
 
-from plan_load.robot import MujocoRobot
-from plan_load.mink_ik import IK
+from coad.robot import MujocoRobot
+from coad.mink_ik import IK
 from geometry.pose import Pose
 
 

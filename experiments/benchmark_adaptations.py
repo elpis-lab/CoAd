@@ -9,19 +9,19 @@ import argparse
 from scipy.spatial import cKDTree
 
 from tqdm import tqdm
-from plan_load.env import MujocoEnv
-from plan_load.robot import MujocoRobot
-from plan_load.mink_ik import get_ik_solver
+from coad.env import MujocoEnv
+from coad.robot import MujocoRobot
+from coad.mink_ik import get_ik_solver
 
-from plan_load.adaptation import LinearAdapter, GRRAdapter
-from plan_load.adaptation import DMPAdapter, TrajOptAdapter
+from coad.adaptation import LinearAdapter, GRRAdapter
+from coad.adaptation import DMPAdapter, TrajOptAdapter
 
-# from plan_load.task_space import deep_tuple
+# from coad.task_space import deep_tuple
 from experiments.visualize_paths import traj_len
-from plan_load.utils import set_seed, load_env_and_robot, get_data_folder
+from coad.utils import set_seed, load_env_and_robot, get_data_folder
 
-from plan_load.env import FreeEnv, CageEnv, BoxEnv, TableEnv, ShelfEnv
-from plan_load.robot import Panda, UR10, FetchArm
+from coad.env import FreeEnv, CageEnv, BoxEnv, TableEnv, ShelfEnv
+from coad.robot import Panda, UR10, FetchArm
 
 
 folder1 = "dataset/top_naive"
