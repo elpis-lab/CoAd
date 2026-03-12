@@ -8,20 +8,14 @@ import mujoco
 import re
 from pathlib import Path
 
+from geometry.pose import wrap_to_pi
 from plan_load.task_generation import find_yaw_iTSR_set, find_iTSR_set
 from plan_load.task_generation import (
     panda_TSR_parameters,
     fetch_TSR_parameters,
     ur10_TSR_parameters,
 )
-from plan_load.robot import MujocoRobot
-from plan_load.robot import Panda
-from plan_load.robot import UR10
-from plan_load.robot import FetchArm
-
-
-def wrap_to_pi(a):
-    return (a + np.pi) % (2 * np.pi) - np.pi
+from plan_load.robot import MujocoRobot, Panda, UR10, FetchArm
 
 
 class MujocoEnv:
@@ -1559,14 +1553,6 @@ class RealEnv(MujocoEnv):
         return (asset + "\n\n" + world_contents).strip()
 
 
-def to_rad(q_degrees):
-    q_rad = []
-    for q_deg in q_degrees:
-        q_rad.append(q_deg * np.pi / 180)
-
-    return q_rad
-
-
 if __name__ == "__main__":
     # Load environment and generate task set
     robot_chosen = "ur10"
@@ -1673,10 +1659,9 @@ if __name__ == "__main__":
     pos1 = [[1000, 1000], [0, 0], [0.05, 0.05], [0, 0]]
     # env.move_swept_volume(pos1)
 
-    new_home_pos = np.array([117.52, -61.10, 89.46, -119.21, -91.35, 30.14])
+    # new_home_pos = np.array([117.52, -61.10, 89.46, -119.21, -91.35, 30.14])
     new_home_pos = np.array([116.36, -62.72, 90.52, -118.66, -91.32, 28.99])
-    new_home_pos = to_rad(new_home_pos)
-    print(new_home_pos)
+    new_home_pos = new_home_pos * np.pi / 180
     robot.set_joint_qpos(new_home_pos)
 
     # env.move_swept_volume(task_keys[random_ind])
