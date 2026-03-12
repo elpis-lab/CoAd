@@ -5,15 +5,15 @@ Implementation of paper "COAD: Constant-Time Planning for Continuous Goal Manipu
 [Paper TBA] [Pre-print TBA] [Presentation Video TBA]
 
 <p align="center">
-    <img src="doc/intro.gif" width="600"/>
+    <img src="doc/dmp.gif" width="330"/>
+    <img src="doc/li_sim.gif" width="360"/>
 </p>
 
-<p align="center">
-    <!-- <a href="https://youtu.be/">
+<!-- <p align="center">
+    <a href="https://youtu.be/">
         <img src="doc/intro.gif" width="600"/>
-    </a> -->
-    <img src="doc/intro.jpg" width="600"/>
-</p>
+    </a>
+</p> -->
 
 
 ## Dependency
@@ -38,63 +38,105 @@ pip install -r requirements_robot.txt
 ## Run this project
 
 <p align="center">
-    <img src="doc/sim.jpg" width="600"/>
+    <img src="doc/experiment.jpg" width="360"/>
 </p>
 
 ### Build library
 
+Given a robot and an environment, we first need to discretize the workspace and acquire the finite task set from TCRs, then solve IK to acuiqre the joint goal set. For example:
+```
+python coad/generate_task_set.py --env table --robot panda
+python coad/generate_joint_goal_set.py --env table --robot panda --ik neighbor
+```
+
+Then we can run one of the adaptation algorithms to build the compressed library. For example:
+```
+python coad/algorithm.py --env table --robot panda --ik neighbor --planner RRTConnect --adaptation grr
+```
+
 ### Comparison of Adaptation Methods
 
-<p align="center">
-    <img src="doc/grr.gif" width="600"/>
-</p>
+Here is a comparison among three methods in both real world and simulation. Overall:
+- Linear Interpolation (LI) offers the fastest adaptation but results in an abrupt motion in the end. 
+- Dynamic Motion Primitives (DMPs) adapts the root path globally and usually provides the best path quality, but failed to compress root path well in cluthered environment.
+- Simple Trajectory Optimization (STO) can also transform the root path globally. But it is sovled with convex optimization and is the slowest.
 
-<p align="center">
-    <img src="doc/dmp.gif" width="600"/>
-</p>
+<br>
 
-<p align="center">
-    <img src="doc/opt.gif" width="600"/>
-</p>
+<div style="display:flex; justify-content:center; gap:5px; flex-wrap:wrap; text-align:center;">
+  <div style="display:inline-block; text-align:center;">
+    <img src="doc/li.gif" width="230"/><br>
+    LI adaptation
+  </div>
+  <div style="display:inline-block; text-align:center;">
+    <img src="doc/dmp.gif" width="230"/><br>
+    DMP adaptation
+  </div>
+  <div style="display:inline-block; text-align:center;">
+    <img src="doc/sto.gif" width="230"/><br>
+    STO adaptation
+  </div>
+</div>
 
-<p align="center">
-    <img src="doc/grr_sim.gif" width="600"/>
-</p>
+<br>
 
-<p align="center">
-    <img src="doc/dmp_sim.gif" width="600"/>
-</p>
-
-<p align="center">
-    <img src="doc/opt_sim.gif" width="600"/>
-</p>
-
+<div style="display:flex; justify-content:center; gap:10px; flex-wrap:wrap; text-align:center;">
+  <div style="display:inline-block; text-align:center;">
+    <img src="doc/root_sim.gif" width="300"/><br>
+    Root Path
+  </div>
+  <div style="display:inline-block; text-align:center;">
+    <img src="doc/li_sim.gif" width="300"/><br>
+    LI adaptation
+  </div>
+  <div style="display:inline-block; text-align:center;">
+    <img src="doc/dmp_sim.gif" width="300"/><br>
+    DMP adaptation
+  </div>
+  <div style="display:inline-block; text-align:center;">
+    <img src="doc/sto_sim.gif" width="300"/><br>
+    STO adaptation
+  </div>
+</div>
 
 ### Benchmarking
 
-#### Generate task set
+To systematically analyze all the adaptation methods and compare with baseline methods, we can run benchmarking with these steps:
+
+#### Generate solutions for CoAd
+
+Run the bash files to generate solutions for all robot-environment pairs with all adaptaion methods:
 ```
-python plan_load/generate_task_set.py --env table --robot panda
+bash experiment/run_experiments.sh
 ```
 
-#### Generate joint goal set from task set
+One can also run individual python file for each robot-environment pair:
+
+- Discretize the entire workspace
+    ```
+    python coad/generate_task_set.py --env table --robot panda
+    ```
+- Generate joint goals from discretized TCRs
+    ```
+    python coad/generate_joint_goal_set.py --env table --robot panda --ik neighbor
+    ```
+- Generate a full-library from all the TCRs
+    ```
+    python coad/generate_task_paths.py --env table --robot panda --ik neighbor --planner RRTConnect
+    ```
+- Condense to get a compressed library from an adaptation method
+    ```
+    python coad/condense_task_paths.py --env table --robot panda --ik neighbor --planner RRTConnect --adaptation linear
+    ```
+
+#### Benchmark adaptation methods
 ```
-python plan_load/generate_joint_goal_set.py --env table --robot panda --ik neighbor
+python experiments/benchmark_adaptations.py
 ```
 
-#### Generate solution set from joint goal set
+#### Benchmark with baselines
 ```
-python plan_load/generate_task_paths.py --env table --robot panda --ik neighbor --planner RRTConnect
-```
-
-#### Run condensation to compress solution set
-```
-python plan_load/condense_task_paths.py --env table --robot panda --ik neighbor --planner RRTConnect --adaptation linear
-```
-
-#### Benchmark results
-```
-python plan_load/
+bash experiments/run_benchmarks.sh
 ```
 
 For detailed analysis and comparison, please refer to our paper.
