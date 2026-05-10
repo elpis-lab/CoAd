@@ -2,7 +2,7 @@
 
 Implementation of paper "COAD: Constant-Time Planning for Continuous Goal Manipulation with Compressed Library and Online Adaptation". This is a framework to provide constant-time solutions to goal-varying motion planning problems through a compressed library and fast online adaptation.
 
-[Paper TBA] [arXiv Preprint](https://arxiv.org/abs/2603.12488) [Presentation Video TBA]
+[Paper TBA] [[arXiv Preprint]](https://arxiv.org/abs/2603.12488) [Presentation Video TBA]
 
 <p align="center">
     <img src="doc/dmp.gif" width="330"/>
