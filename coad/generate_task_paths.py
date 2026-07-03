@@ -42,26 +42,12 @@ def solve_batch(
     batch_path_lengths = np.full(len(joint_goal_set), np.nan)
     fallback_path_lengths = np.full(len(joint_goal_set), np.nan)
 
-    error_counts = {
-        0: 0,
-        1: 0,
-        2: 0,
-        3: 0,
-        4: 0
-    }
-
-    # Initialize LazyPRM* and RRTConnect Fallback planners
+    # Initialize PRM* and RRTConnect Fallback planners
     batch_planner = planner
     individual_planner = OMPLPlanner(robot, data, planner="RRTConnect")
 
     # Initial batch planning phrase
-    print("Sampling for batch planning...")
-    # batch_planner.sample_for_batch_planning(
-    #     start=start, timeout=batch_time_budget
-    # )
-
-    robot.viewer.sync()
-
+    print("Building roadmap...")
     batch_planner.construct_roadmap(
         start,
         timeout=batch_time_budget

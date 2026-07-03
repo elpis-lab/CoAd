@@ -10,6 +10,7 @@ import ompl.util as ou
 
 import mujoco
 from coad.robot import MujocoRobot
+from scipy.spatial import cKDTree
 
 
 class OMPLPlanner:
@@ -252,23 +253,30 @@ class OMPLPlanner:
         self.planner_data = pd
         self.graph_vertices = vertices
         self.graph_adj = adjacency
+        self.vertex_tree = cKDTree(self.graph_vertices)
 
         print("Graph vertices:", n)
         print("Graph edges directed:", sum(len(a) for a in adjacency))
 
     def connect_temp_config(self, q, k=30):
         q = np.asarray(q, dtype=float)
-        dists = np.linalg.norm(self.graph_vertices - q[None, :], axis=1)
-        nbrs = np.argpartition(dists, k)[:k]
-        nbrs = nbrs[np.argsort(dists[nbrs])]
+
+        k = min(k, len(self.graph_vertices))
+        dists, nbrs = self.vertex_tree.query(q, k=k)
+
+        # cKDTree returns scalars when k == 1
+        dists = np.atleast_1d(dists)
+        nbrs = np.atleast_1d(nbrs)
 
         edges = []
         q_state = self.numpy_to_state(q)
 
-        for j in nbrs:
+        for dist, j in zip(dists, nbrs):
+            j = int(j)
             qj_state = self.numpy_to_state(self.graph_vertices[j])
+
             if self.si.checkMotion(q_state(), qj_state()):
-                edges.append((int(j), float(dists[j])))
+                edges.append((j, float(dist)))
 
         return edges
     
@@ -311,12 +319,22 @@ class OMPLPlanner:
         blocked_vertices = set()
 
         for _ in range(max_attempts):
-            idx_path = dijkstra(
+            # idx_path = dijkstra(
+            #     query_adj,
+            #     s_idx,
+            #     g_idx,
+            #     blocked_edges=blocked_edges,
+            #     blocked_vertices=blocked_vertices,
+            # )
+            idx_path = astar(
                 query_adj,
                 s_idx,
                 g_idx,
+                self.graph_vertices,
+                np.asarray(start, dtype=float),
+                np.asarray(goal, dtype=float),
                 blocked_edges=blocked_edges,
-                blocked_vertices=blocked_vertices,
+                blocked_vertices=blocked_vertices
             )
             if idx_path is None:
                 return None
@@ -470,6 +488,66 @@ def dijkstra(adj, start_idx, goal_idx, blocked_edges=None, blocked_vertices=None
 
     return path[::-1]
 
+def astar(adj, start_idx, goal_idx, vertices, start_q, goal_q, blocked_edges=None, blocked_vertices=None):
+    if blocked_edges is None:
+        blocked_edges = set()
+    if blocked_vertices is None:
+        blocked_vertices = set()
+    
+    n_graph = len(vertices)
+    n_total = len(adj)
+
+    def q_of(idx):
+        if idx < n_graph:
+            return vertices[idx]
+        elif idx == start_idx:
+            return start_q
+        elif idx == goal_idx:
+            return goal_q
+        raise IndexError(idx)
+
+    def heuristic(idx):
+        return np.linalg.norm(q_of(idx) - goal_q)
+    
+    g_score = np.full(n_total, np.inf)
+    parent = np.full(n_total, -1, dtype=np.int64)
+
+    g_score[start_idx] = 0.0
+    pq = [(heuristic(start_idx), 0.0, start_idx)]
+
+    while pq:
+        f, g, u = heapq.heappop(pq)
+
+        if g != g_score[u]:
+            continue
+
+        if u == goal_idx:
+            break
+
+        if u in blocked_vertices and u not in (start_idx, goal_idx):
+            continue
+
+        for v, w in adj[u]:
+            if v in blocked_vertices and v not in (start_idx, goal_idx):
+                continue
+            if (u, v) in blocked_edges or (v, u) in blocked_edges:
+                continue
+            new_g = g + w
+            if new_g < g_score[v]:
+                g_score[v] = new_g
+                parent[v] = u
+                heapq.heappush(pq, (new_g + heuristic(v), new_g, v))
+    
+    if not np.isfinite(g_score[goal_idx]):
+        return None
+    
+    path = []
+    cur = goal_idx
+    while cur != -1:
+        path.append(cur)
+        cur = parent[cur]
+
+    return path[::-1]
 
 def euclidean_path_length(traj):
     """Compute the length of a trajectory."""
