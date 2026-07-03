@@ -46,9 +46,15 @@ class OMPLPlanner:
         # Set up OMPL planner
         self.planner_name = planner
         self.ss, self.si = self.set_up_ompl()
+        self.si.setStateValidityCheckingResolution(0.005)
+
         self.planner = self.ss.getPlanner()
         if not log:
             ou.setLogLevel(ou.LOG_ERROR)
+
+        self.query_states = []
+        self.goal_vertices = []
+        
 
     def set_up_ompl(self):
         """Setup OMPL planner"""
@@ -106,9 +112,10 @@ class OMPLPlanner:
         self.ss.setStartAndGoalStates(start_state, goal_state)
 
         # Solve
+        waypoints = np.empty((0, self.n_dof), dtype=np.float32)
         t0 = time.perf_counter()
-        waypoints = []
         status = self.ss.solve(float(timeout))
+
         if status.asString() == "Exact solution":
             if log:
                 print("Path solution found.")
@@ -144,8 +151,13 @@ class OMPLPlanner:
             planning_time = self.ss.getLastPlanComputationTime()
             return waypoints, total_time, planning_time
         return waypoints
+    
 
-    def construct_roadmap(self, start, timeout=30.0):
+    def construct_roadmap(
+        self,
+        start,
+        timeout=30.0
+    ):
         """
         Sample uniformly in the state space and build a roadmap.
         The roadmap is kept for subsequent planning calls.
@@ -154,93 +166,48 @@ class OMPLPlanner:
             "PRM" in self.planner_name
         ), f"Planner {self.planner_name} is not supported."
 
-        # Set start and a dummy goal (same as start)
-        # so ProblemDefinition is valid.
-        start_state = ob.State(self.si.getStateSpace())
+        self.start_np = np.asarray(start, dtype=float).copy()
+        
+        self.start_state = ob.State(self.si.getStateSpace())
         for i in range(self.n_dof):
-            start_state[i] = float(start[i])
-        self.ss.setStartAndGoalStates(start_state, start_state)
-
+            self.start_state[i] = float(start[i])
+        
         # Start growing the roadmap
+        self.ss.setStartAndGoalStates(self.start_state, self.start_state)
         self.ss.setup()
         ter = ob.timedPlannerTerminationCondition(float(timeout))
         self.planner.constructRoadmap(ter)
 
-    def query(
-        self,
-        start,
-        goal,
-        timeout=10.0,
-        smooth_path=True,
-        num_waypoints=200,
-        benchmark=False,
-        check_time_freq=1e-3,
-    ):
-        """
-        Solve a start-goal query using the pre-built roadmap from
-        sample_for_batch_planning. Reuses the roadmap; call clearQuery
-        between queries to clear only the previous start/goal.
-        """
-        assert (
-            "PRM" in self.planner_name
-        ), f"Planner {self.planner_name} is not supported."
+        # Add persistent start milestone AFTER roadmap construction.
+        n0 = self.planner.milestoneCount()
+        e0 = self.planner.edgeCount()
 
-        # Clear previous query (start/goal) but keep the roadmap
-        self.planner.clearQuery()
+        self.v_start = self.planner.addMilestone(self.start_state())
 
-        # Set new start and goal
-        start_state = ob.State(self.si.getStateSpace())
-        goal_state = ob.State(self.si.getStateSpace())
-        for i in range(self.n_dof):
-            start_state[i] = float(start[i])
-            goal_state[i] = float(goal[i])
-        self.ss.setStartAndGoalStates(start_state, goal_state)
+        print("start milestone added")
+        print("milestones:", n0, "->", self.planner.milestoneCount())
+        print("edges:", e0, "->", self.planner.edgeCount())
+        print(f"Roadmap edge count after construction: {self.planner.edgeCount()}")
 
-        # TODO
-        # need customized OMPL implementation here
-        t0 = time.perf_counter()
-        waypoints = []
-        timeout_c = time.perf_counter()
-        status_str = ""
-        while status_str != "Exact solution":
-            status = self.ss.solve(check_time_freq)
-            status_str = status.asString()
-            if time.perf_counter() - timeout_c > float(timeout):
-                break
+        print("Building python graph...")
 
-        # Check collision since environment is changed
-        valid_path = False
-        if status.asString() == "Exact solution":
-            valid_path = True
-            path = self.ss.getSolutionPath()
-            for state in path.getStates():
-                if not self.validity_checker(state):
-                    valid_path = False
-                    break
+        self.build_graph_from_planner_data()
 
-        if status.asString() == "Exact solution" and valid_path:
-            path = self.ss.getSolutionPath()
-            if smooth_path:
-                ps = og.PathSimplifier(self.si)
-                try:
-                    ps.ropeShortcutPath(path)
-                except Exception:
-                    ps.shortcutPath(path)
-                ps.smoothBSpline(path)
-            if num_waypoints is not None:
-                path.interpolate(int(num_waypoints))
-            states = path.getStates()
-            waypoints = [
-                np.array([s[i] for i in range(self.n_dof)], dtype=float)
-                for s in states
-            ]
+        print("Done building Python graph.")
 
-        if benchmark:
-            t1 = time.perf_counter()
-            total_time = round(t1 - t0, 5)
-            planning_time = self.ss.getLastPlanComputationTime()
-            return waypoints, total_time, planning_time
-        return waypoints
+
+    def validate_path(self, path):
+        states = path.getStates()
+
+        for s in states:
+            if not self.validity_checker(s):
+                return False
+
+        for s1, s2 in zip(states[:-1], states[1:]):
+            if not self.si.checkMotion(s1, s2):
+                return False
+
+        return True
 
     def validity_checker(self, state):
         """Check if the state is valid"""
@@ -251,6 +218,257 @@ class OMPLPlanner:
         # Check for collisions
         in_contact = self.robot.in_contact()
         return not in_contact
+
+    def build_graph_from_planner_data(self):
+        pd = ob.PlannerData(self.si)
+        self.planner.getPlannerData(pd)
+        pd.computeEdgeWeights()
+
+        n = pd.numVertices()
+        vertices = np.zeros((n, self.n_dof), dtype=np.float64)
+        adjacency = [[] for _ in range(n)]
+
+        # Extract vertices
+        for i in range(n):
+            s = pd.getVertex(i).getState()
+            vertices[i] = [s[j] for j in range(self.n_dof)]
+
+        # Extract edges
+        import ompl.util as ou
+
+        for i in range(n):
+            edge_list = ou.vectorUint()
+            pd.getEdges(i, edge_list)
+
+            for j in edge_list:
+                j = int(j)
+                try:
+                    w = pd.getEdgeWeight(i, j).value()
+                except Exception:
+                    w = np.linalg.norm(vertices[i] - vertices[j])
+
+                adjacency[i].append((j, float(w)))
+
+        self.planner_data = pd
+        self.graph_vertices = vertices
+        self.graph_adj = adjacency
+
+        print("Graph vertices:", n)
+        print("Graph edges directed:", sum(len(a) for a in adjacency))
+
+    def connect_temp_config(self, q, k=30):
+        q = np.asarray(q, dtype=float)
+        dists = np.linalg.norm(self.graph_vertices - q[None, :], axis=1)
+        nbrs = np.argpartition(dists, k)[:k]
+        nbrs = nbrs[np.argsort(dists[nbrs])]
+
+        edges = []
+        q_state = self.numpy_to_state(q)
+
+        for j in nbrs:
+            qj_state = self.numpy_to_state(self.graph_vertices[j])
+            if self.si.checkMotion(q_state(), qj_state()):
+                edges.append((int(j), float(dists[j])))
+
+        return edges
+    
+    def make_query_graph(self, start_q, goal_q, k=30):
+        vertices = self.graph_vertices
+        base_adj = self.graph_adj
+        n = len(vertices)
+
+        start_idx = n
+        goal_idx = n + 1
+
+        query_adj = [list(a) for a in base_adj]
+        query_adj.append([])
+        query_adj.append([])
+
+        start_edges = self.connect_temp_config(start_q, k=k)
+        goal_edges = self.connect_temp_config(goal_q, k=k)
+
+        for j, w in start_edges:
+            query_adj[start_idx].append((j, w))
+            query_adj[j].append((start_idx, w))
+
+        for j, w in goal_edges:
+            query_adj[goal_idx].append((j, w))
+            query_adj[j].append((goal_idx, w))
+
+        return query_adj, start_idx, goal_idx
+
+    def graph_query(
+        self,
+        start,
+        goal,
+        max_attempts=5,
+        k=30,
+        smooth_path=True,
+        num_waypoints=200
+    ):
+        query_adj, s_idx, g_idx = self.make_query_graph(start, goal, k=k)
+        blocked_edges = set()
+        blocked_vertices = set()
+
+        for _ in range(max_attempts):
+            idx_path = dijkstra(
+                query_adj,
+                s_idx,
+                g_idx,
+                blocked_edges=blocked_edges,
+                blocked_vertices=blocked_vertices,
+            )
+            if idx_path is None:
+                return None
+
+            q_path = self.idx_path_to_waypoints(idx_path, start, goal)
+            valid, failure = self.validate_np_path_and_bad_edge(q_path)
+
+            if valid:
+                path = self.np_path_to_path_geometric(q_path)
+
+                if smooth_path:
+                    ps = og.PathSimplifier(self.si)
+                    try:
+                        ps.ropeShortcutPath(path)
+                    except KeyboardInterrupt:
+                        raise
+                    except Exception:
+                        if hasattr(ps, "shortcutPath"):
+                            ps.shortcutPath(path)
+
+                    ps.smoothBSpline(path)
+
+                if num_waypoints is not None:
+                    path.interpolate(int(num_waypoints))
+
+                # # Recheck final path after smoothing/interpolation.
+                # validation = self.validate_path_with_prefix(path)
+                valid = self.validate_path(path)
+                # if not validation["valid"]:
+                if not valid:
+                    return None
+
+                return np.array([
+                    [s[i] for i in range(self.n_dof)]
+                    for s in path.getStates()
+                ], dtype=float)
+
+            if failure is None:
+                return None
+
+            if failure[0] == "edge":
+                _, path_i, path_j = failure
+                u = idx_path[path_i]
+                v = idx_path[path_j]
+                blocked_edges.add((u, v))
+                blocked_edges.add((v, u))
+
+            elif failure[0] == "state":
+                _, path_i = failure
+                bad_v = idx_path[path_i]
+
+                if bad_v in (s_idx, g_idx):
+                    return None
+
+                blocked_vertices.add(bad_v)
+
+        return None
+
+    def numpy_to_state(self, q):
+        s = ob.State(self.si.getStateSpace())
+        for i in range(self.n_dof):
+            s[i] = float(q[i])
+        return s
+    
+    def idx_path_to_waypoints(self, idx_path, start_q, goal_q):
+        n = len(self.graph_vertices)
+        out = []
+
+        for idx in idx_path:
+            if idx < n:
+                out.append(self.graph_vertices[idx])
+            elif idx == n:
+                out.append(np.asarray(start_q, dtype=float))
+            elif idx == n + 1:
+                out.append(np.asarray(goal_q, dtype=float))
+
+        return np.asarray(out)
+    
+    def np_path_to_path_geometric(self, q_path):
+        path = og.PathGeometric(self.si)
+
+        for q in q_path:
+            s = self.numpy_to_state(q)
+            path.append(s())
+
+        return path
+
+    def validate_np_path_and_bad_edge(self, q_path):
+        if q_path is None or len(q_path) == 0:
+            return False, None
+
+        states = [self.numpy_to_state(q) for q in q_path]
+
+        for i, s in enumerate(states):
+            if not self.validity_checker(s()):
+                return False, ("state", i)
+
+        for i in range(len(states) - 1):
+            if not self.si.checkMotion(states[i](), states[i + 1]()):
+                return False, ("edge", i, i + 1)
+
+        return True, None
+
+import heapq
+import math
+
+def dijkstra(adj, start_idx, goal_idx, blocked_edges=None, blocked_vertices=None):
+    if blocked_edges is None:
+        blocked_edges = set()
+    if blocked_vertices is None:
+        blocked_vertices = set()
+
+    n = len(adj)
+    dist = np.full(n, np.inf)
+    parent = np.full(n, -1, dtype=np.int64)
+
+    dist[start_idx] = 0.0
+    pq = [(0.0, start_idx)]
+
+    while pq:
+        d, u = heapq.heappop(pq)
+
+        if u in blocked_vertices and u not in (start_idx, goal_idx):
+            continue
+
+        if d != dist[u]:
+            continue
+        if u == goal_idx:
+            break
+
+        for v, w in adj[u]:
+            if v in blocked_vertices and v not in (start_idx, goal_idx):
+                continue
+            if (u, v) in blocked_edges or (v, u) in blocked_edges:
+                continue
+
+            nd = d + w
+            if nd < dist[v]:
+                dist[v] = nd
+                parent[v] = u
+                heapq.heappush(pq, (nd, v))
+
+    if not np.isfinite(dist[goal_idx]):
+        return None
+
+    path = []
+    cur = goal_idx
+    while cur != -1:
+        path.append(cur)
+        cur = parent[cur]
+
+    return path[::-1]
 
 
 def euclidean_path_length(traj):

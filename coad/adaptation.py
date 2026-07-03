@@ -86,9 +86,14 @@ class LinearAdapter(Adapter):
     def compress(self, center, nb_path, goal_refinement=True):
         """Compress the nb_path into the center_path"""
         # Get end goal for neighbor
-        q_goal = nb_path[-1]
+        
+        if nb_path.ndim == 1:
+            q_goal = nb_path
+        else:
+            q_goal = nb_path[-1]
         if goal_refinement:
-            reached, q = self.ik_refinement(center[-1], nb_path[-1])
+            # reached, q = self.ik_refinement(center[-1], nb_path[-1])
+            reached, q = self.ik_refinement(center[-1], q_goal)
             if reached:
                 q_goal = q
 
@@ -115,9 +120,13 @@ class GRRAdapter(LinearAdapter):
     def compress(self, center, nb_path, goal_refinement=True):
         """Compress the nb_path into the center_path"""
         # Get end goal for neighbor
-        q_goal = nb_path[-1]  # original end goal
+        if nb_path.ndim == 1:
+            q_goal = nb_path
+        else:
+            q_goal = nb_path[-1]
         if goal_refinement:
-            reached, q = self.ik_refinement(center[-1], nb_path[-1])
+            # reached, q = self.ik_refinement(center[-1], nb_path[-1])
+            reached, q = self.ik_refinement(center[-1], q_goal)
             if reached:
                 q_goal = q
 
@@ -224,9 +233,14 @@ class DMPAdapter(Adapter):
         Return (ok, q_goal).
         If ok=True, the neighbor is represented only by q_goal.
         """
-        q_goal = nb_path[-1]  # original end goal
+
+        if nb_path.ndim == 1:
+            q_goal = nb_path
+        else:
+            q_goal = nb_path[-1]
         if goal_refinement:
-            reached, q = self.ik_refinement(center.goal, nb_path[-1])
+            # reached, q = self.ik_refinement(center[-1], nb_path[-1])
+            reached, q = self.ik_refinement(center.goal, q_goal)
             if reached:
                 q_goal = q
 
@@ -300,9 +314,14 @@ class TrajOptAdapter(Adapter):
 
     def compress(self, center, nb_path, goal_refinement=True):
         """Compress the nb_path into the center_path"""
-        q_goal = nb_path[-1]  # original end goal
+        
+        if nb_path.ndim == 1:
+            q_goal = nb_path
+        else:
+            q_goal = nb_path[-1]
         if goal_refinement:
-            reached, q = self.ik_refinement(center[-1], nb_path[-1])
+            # reached, q = self.ik_refinement(center[-1], nb_path[-1])
+            reached, q = self.ik_refinement(center[-1], q_goal)
             if reached:
                 q_goal = q
 

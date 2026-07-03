@@ -11,6 +11,9 @@ from coad.env import (
     ShelfEnv,
     FreeEnv,
     RealEnv,
+    LargeObjectEnv,
+    MicrowaveEnv,
+    AllStableEnv
 )
 from coad.robot import MujocoRobot, Panda, UR10, FetchArm
 
@@ -64,6 +67,12 @@ def load_env_and_robot(
         env = FreeEnv(robot_name)
     elif env_name == "real":
         env = RealEnv(robot_name)
+    elif env_name == "largeobj":
+        env = LargeObjectEnv(robot_name)
+    elif env_name == "microwave":
+        env = MicrowaveEnv(robot_name)
+    elif env_name == "allstable":
+        env = AllStableEnv(robot_name)
     else:
         raise ValueError(f"Invalid environment: {env_name}")
 
@@ -78,5 +87,7 @@ def load_env_and_robot(
     else:
         raise ValueError(f"Invalid robot: {robot_name}")
 
-    robot.teleport_base(pos=env.robot_pos, quat=env.robot_quat)
+    robot_pos = env.env_details['robot_pos']
+    robot_quat = env.env_details['robot_quat']
+    robot.teleport_base(pos=robot_pos, quat=robot_quat)
     return env, robot

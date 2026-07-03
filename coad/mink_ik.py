@@ -7,7 +7,7 @@ import mujoco
 import mink
 
 from coad.mujoco_utils import sample_qpos
-from coad.robot import MujocoRobot, Panda, UR10, FetchArm
+from coad.robot import MujocoRobot, Panda, UR10, FetchArm, G1
 
 
 def get_ik_solver(
@@ -20,6 +20,8 @@ def get_ik_solver(
         ik_class = UR10IK
     elif isinstance(robot, FetchArm):
         ik_class = FetchArmIK
+    elif isinstance(robot, G1):
+        ik_class = G1ArmIK
     else:
         raise ValueError("No IK solver for robot type.")
 
@@ -322,6 +324,25 @@ class FetchArmIK(IK):
         max_velocities = {name: np.pi for name in robot.joint_names}
         super().__init__(robot, solver, collision_pairs, max_velocities)
 
+class G1ArmIK(IK):
+    """G1 Arm only IK"""
+    def __init__(
+        self,
+        robot: G1,
+        solver: str = "daqp",
+        env_collision_geoms: list[str] = None,
+    ):
+        """Initialize the FetchArm IK class"""
+        # Collision constraints
+        # self collision
+        # collision_pairs = [(self.GRIPPER, self.ARM)]
+        collision_pairs = []
+        # environment collision
+        # if env_collision_geoms is not None:
+            # collision_pairs.append((self.GRIPPER, env_collision_geoms))
+        # Velocity limits
+        max_velocities = {name: np.pi for name in robot.joint_names}
+        super().__init__(robot, solver, collision_pairs, max_velocities)
 
 if __name__ == "__main__":
     # Test Panda

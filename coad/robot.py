@@ -150,6 +150,106 @@ class Panda(MujocoRobot):
             self.data.qpos[model.jnt_qposadr[j_id]] = self.FINGER_OPEN[i]
         mujoco.mj_forward(model, self.data)
 
+class G1(MujocoRobot):
+    """Unitree G1 specialization"""
+
+    LEFT_ARM = [
+        "left_shoulder_pitch_joint",
+        "left_shoulder_roll_joint",
+        "left_shoulder_yaw_joint",
+        "left_elbow_joint",
+        "left_wrist_roll_joint",
+    ]
+
+    RIGHT_ARM = [
+        "right_shoulder_pitch_joint",
+        "right_shoulder_roll_joint",
+        "right_shoulder_yaw_joint",
+        "right_elbow_joint",
+        "right_wrist_roll_joint",
+    ]
+
+    def __init__(self, model, data=None, visualize=False):
+        """Initialize G1Robot"""
+        MujocoRobot.__init__(
+            self,
+            model,
+            joint_names=self.LEFT_ARM,
+            root_link="pelvis",
+            data=data,
+            collision_geom_group=3,
+            ee_name="left_attachment_site",
+            visualize=visualize,
+        )
+
+        print("\nBodies:")
+        for i in range(model.nbody):
+            print(mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, i))
+
+        print("\nGeoms:")
+        for i in range(model.ngeom):
+            print(mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, i))
+
+        print("\nSites:")
+        for i in range(model.nsite):
+            print(mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_SITE, i))
+
+# Double panda for visualization
+
+# class Panda(MujocoRobot):
+#     """Franka Panda specialization (supports multiple instances via name prefix)."""
+
+#     ARM = [
+#         "joint1",
+#         "joint2",
+#         "joint3",
+#         "joint4",
+#         "joint5",
+#         "joint6",
+#         "joint7",
+#     ]
+#     HOME_POS = [0, 0, 0, -np.pi / 2, 0, np.pi / 2, -np.pi / 4]
+#     FINGER = ["finger_joint1", "finger_joint2"]
+#     FINGER_OPEN = [0.04, 0.04]
+#     FINGER_CLOSED = [0.0, 0.0]
+
+#     def __init__(self, model, data=None, visualize=False, prefix: str = ""):
+#         """
+#         Initialize PandaRobot.
+
+#         prefix: prepended to all MJCF names for this robot instance.
+#                 Examples: "", "f1_", "f2_"
+#         """
+#         self.prefix = prefix
+
+#         def p(name: str) -> str:
+#             return f"{self.prefix}{name}" if self.prefix else name
+
+#         arm_joints = [p(j) for j in self.ARM]
+#         finger_joints = [p(j) for j in self.FINGER]
+
+#         MujocoRobot.__init__(
+#             self,
+#             model,
+#             joint_names=arm_joints,
+#             root_link=p("link0"),
+#             data=data,
+#             collision_geom_group=3,
+#             ee_name=p("attachment_site"),
+#             visualize=visualize,
+#         )
+
+#         # Send to home (arm joints only)
+#         self.set_joint_qpos(self.HOME_POS)
+
+#         # Open the gripper (finger slide joints)
+#         for i, finger in enumerate(finger_joints):
+#             j_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, finger)
+#             self.data.qpos[model.jnt_qposadr[j_id]] = float(self.FINGER_OPEN[i])
+
+#         mujoco.mj_forward(model, self.data)
+
+
 
 class UR10(MujocoRobot):
     """UR10 specialization."""

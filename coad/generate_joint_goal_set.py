@@ -84,7 +84,7 @@ def convert_task_to_joint_goal(
     # Get an IK solver
     model = robot.model
     data = robot.data
-    ik_solver = get_ik_solver(robot, env_collision_geoms=env.collision_geoms)
+    ik_solver = get_ik_solver(robot, env_collision_geoms=env.env_details['collision_geoms'])
 
     # Result containers
     ik_success = np.zeros(len(task_set), dtype=bool)
@@ -116,27 +116,28 @@ def convert_task_to_joint_goal(
         # Moving object (swept volume) to given key pose
         env.move_swept_volume(key)
 
+        if env.env_details['env_name'] == "allstable":
+            key = key[1:]
+        
         # Get the end effector targets of the current task
         # object pose
         key_arr = np.array(key)
         key_center = (key_arr[:, 0] + key_arr[:, 1]) / 2
-        obj_pose = Pose(key_center[:3], (0, 0, key_center[3])).matrix()
 
-        # remove unreachable offset from env.ee_offset
-        ee_offsets = env.ee_offset.copy()
-        if env.yaw_edges is not None and env.worst_ee_offset_idx is not None:
-            yaw = wrap_to_pi(key_center[3])
-            k = np.searchsorted(env.yaw_edges, yaw, side="right") - 1
-            k = np.clip(k, 0, len(env.worst_ee_offset_idx) - 1)
-            bad = int(env.worst_ee_offset_idx[k])
-            ee_offsets = [T for j, T in enumerate(env.ee_offset) if j != bad]
+        if (env.object_details['type'] == "microwave"):
+            obj_pose = env.get_geom_pose("microwave_handle_sv", as_matrix=True)
+        else:
+            obj_pose = Pose(key_center[:3], (0, 0, key_center[3])).matrix()
 
+        ee_offsets = env.grasp_details['ee_offsets'].copy()
+        # print(f"ee_offsets: {ee_offsets}")
+        
         # multiple potential ee targets
         targets = [matrix_to_flat(obj_pose @ offset) for offset in ee_offsets]
         # give each target the same number of attempts
         n_target_attempts = int(np.ceil(ik_max_attempts / len(targets)))
         # ik_max_attempts = len(targets) * n_target_attempts
-
+        # print(f"targets: {targets}")
         # Start solving IK
         t0 = time.perf_counter()
         valid_ik = False
@@ -166,9 +167,10 @@ def convert_task_to_joint_goal(
         # Update viewer
         if robot.viewer is not None:
             robot.viewer.sync()
+            # input("Proceed?")
 
         # Update tqdm message periodically
-        print_interval = 500
+        print_interval = 10
         if (i + 1) % print_interval == 0:
             m_ik = np.nanmean(ik_times[np.array(ik_success)])
             tqdm.write(
@@ -197,7 +199,7 @@ def main(args):
         return
 
     # Load environment and robot
-    env, robot = load_env_and_robot(args.env, args.robot)
+    env, robot = load_env_and_robot(args.env, args.robot, visualize=True)
 
     # Solve problems
     # Load the task set
@@ -214,7 +216,7 @@ def main(args):
 
     # Convert task set to joint goal set
     joint_goal_set, results = convert_task_to_joint_goal(
-        env, robot, task_set, args.ik, ik_max_attempts=20
+        env, robot, task_set, args.ik, ik_max_attempts=30
     )
 
     # Save results
@@ -231,7 +233,16 @@ def parse_arguments():
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument(
         "--env",
-        choices=["table", "box", "cage", "shelf", "free", "real"],
+        choices=[
+            "table",
+            "box",
+            "cage",
+            "shelf",
+            "free",
+            "real",
+            "largeobj",
+            "microwave",
+            "allstable"],
         default="table",
     )
     parser.add_argument(

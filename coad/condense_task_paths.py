@@ -29,7 +29,7 @@ def condense_dataset(
     and compressing nearby neighbors
     """
     model, data = robot.model, robot.data
-    ik_solver = get_ik_solver(robot, env_collision_geoms=env.collision_geoms)
+    ik_solver = get_ik_solver(robot, env_collision_geoms=env.env_details['collision_geoms'])
     if adaptation == "linear":
         adapter = LinearAdapter(robot, ik_solver)
     elif adaptation == "grr":
@@ -203,8 +203,16 @@ def parse_arguments():
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument(
         "--env",
-        choices=["table", "box", "cage", "shelf", "free", "real"],
-        default="table",
+        choices=[
+            "table", 
+            "box",
+            "cage",
+            "shelf",
+            "free",
+            "real",
+            "largeobj",
+            "microwave",
+            "allstable"], default="table",
     )
     parser.add_argument(
         "--robot", choices=["panda", "ur10", "fetch"], default="panda"

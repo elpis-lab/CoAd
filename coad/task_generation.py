@@ -1,5 +1,6 @@
 import numpy as np
 from tqdm import tqdm
+import itertools
 
 # TODO
 # This part generates the TCRs for the workspace
@@ -7,6 +8,7 @@ from tqdm import tqdm
 # This can be written as TCR directly with
 # 1, theoretical bounds in SE2 derived from TSRs' bound
 # 2, customized bounds directly defined in TCRs
+
 
 
 def find_TSR_HMat(xyz, yaw):
@@ -23,14 +25,29 @@ def find_TSR_HMat(xyz, yaw):
     return TSR_HMat
 
 
+def xy_half_extents(half_side):
+    """Return separate x/y half extents.
+
+    Older code passed a scalar `half_side`, which treated the translational
+    footprint as square.  For rectangular objects, pass `(x_half, y_half)` to
+    preserve different x/y coverage.
+    """
+    if isinstance(half_side, (list, tuple, np.ndarray)):
+        if len(half_side) != 2:
+            raise ValueError("half_side must be a scalar or a length-2 x/y extent")
+        return float(half_side[0]), float(half_side[1])
+    return float(half_side), float(half_side)
+
+
 def find_TSR_Bounds(Bw, TSR_HMat1, yaw_1, yaw_2, yaw_buffer, half_side, grasp):
     tw1_0 = TSR_HMat1[:3, 3]
+    x_half, y_half = xy_half_extents(half_side)
 
     if grasp == "top":
         B = np.array(
             [
-                [tw1_0[0] - half_side, tw1_0[0] + half_side],
-                [tw1_0[1] - half_side, tw1_0[1] + half_side],
+                [tw1_0[0] - x_half, tw1_0[0] + x_half],
+                [tw1_0[1] - y_half, tw1_0[1] + y_half],
                 [tw1_0[2] + Bw[2, 0], tw1_0[2] + Bw[2, 1]],
                 [Bw[3, 0], Bw[3, 1]],
                 [Bw[4, 0], Bw[4, 1]],
@@ -40,8 +57,8 @@ def find_TSR_Bounds(Bw, TSR_HMat1, yaw_1, yaw_2, yaw_buffer, half_side, grasp):
     else:  # front
         B = np.array(
             [
-                [tw1_0[0] - half_side, tw1_0[0] + half_side],
-                [tw1_0[1] - half_side, tw1_0[1] + half_side],
+                [tw1_0[0] - x_half, tw1_0[0] + x_half],
+                [tw1_0[1] - y_half, tw1_0[1] + y_half],
                 [tw1_0[2] + Bw[2, 0], tw1_0[2] + Bw[2, 1]],
                 [yaw_2 - yaw_buffer, yaw_1 + yaw_buffer],
                 [Bw[4, 0], Bw[4, 1]],
@@ -96,7 +113,7 @@ def find_B0_intersection(B1_0, B2_0):
 
     yawmin = max(B1_0[5, 0], B2_0[5, 0])
     yawmax = min(B1_0[5, 1], B2_0[5, 1])
-    if zmin <= zmax:
+    if yawmin <= yawmax:
         yawlim = [yawmin, yawmax]
     else:
         yawlim = [None, None]
@@ -146,7 +163,7 @@ def find_intersection(s1, s2):
     return xlim
 
 
-def rmin_rmax_from_square_corners(tw1, tw2, nominal_pose=None):
+def rmin_rmax_from_rectangle_corners_2d(tw1, tw2, nominal_pose=None):
     x0, y0 = nominal_pose[0], nominal_pose[1]
 
     # robust min/max even if tw1/tw2 aren't ordered
@@ -187,6 +204,11 @@ def rmin_rmax_from_square_corners(tw1, tw2, nominal_pose=None):
     r_max = np.sqrt(max(r2_1, r2_2, r2_3, r2_4))
 
     return r_min, r_max
+
+
+
+# Backwards-compatible alias for older imports/calls.
+rmin_rmax_from_square_corners = rmin_rmax_from_rectangle_corners_2d
 
 
 def rmin_rmax_from_box_corners(tw1, tw2, nominal_pose=(0.0, 0.0, 0.0)):
@@ -292,134 +314,281 @@ def make_Tew_x_variants(
     return [Tx(th) @ Tew_base for th in angles]
 
 
-def panda_TSR_parameters(object_details, yaw_buffer, alpha):
+def is_box_object(object_details):
+    return object_details.get("type", "box") == "box"
+
+
+def valid_yaw_angles_for_box_grasp(object_size, gripper_width, margin=0.0):
+    """Return yaw variants that can physically fit a rectangular box.
+
+    Convention used here:
+      * 0 and pi close across the object's y dimension.
+      * pi/2 and 3pi/2 close across the object's x dimension.
+
+    This keeps the old 4-fold symmetry for square/small objects, but rejects
+    impossible 90-degree variants for long cuboids.
+    """
+    sx, sy = float(object_size[0]), float(object_size[1])
+    allowed = []
+
+    if sy + margin <= gripper_width:
+        allowed.extend([0.0, np.pi])
+    if sx + margin <= gripper_width:
+        allowed.extend([np.pi / 2, 3 * np.pi / 2])
+
+    if not allowed:
+        raise ValueError(
+            f"Object footprint {object_size[:2]} does not fit gripper width "
+            f"{gripper_width} with margin {margin}."
+        )
+
+    return tuple(allowed)
+
+
+def yaw_angles_for_object_grasp(object_details, gripper_width, margin=0.0):
+    if is_box_object(object_details):
+        return valid_yaw_angles_for_box_grasp(
+            object_details["size"], gripper_width, margin
+        )
+    return (0.0, np.pi / 2, np.pi, 3 * np.pi / 2)
+
+
+def effective_xy_size_for_grasp_clearance(object_details, gripper_width, margin=0.0):
+    """Return the x/y size to use when computing TSR translational clearance.
+
+    For long cuboids, one footprint dimension may exceed the gripper opening,
+    but the object can still be graspable if the perpendicular/narrow dimension
+    fits. Since this generator stores one Bw per grasp strategy, not one Bw per
+    yaw variant, we use the graspable/narrow dimension for both x/y clearance
+    whenever only one orientation class is physically valid.
+
+    This avoids immediately producing negative clearance for long-but-graspable
+    cuboids while keeping the original behavior for square/small boxes.
+    """
+    if not is_box_object(object_details):
+        return object_details["size"][0], object_details["size"][1]
+
+    sx, sy = float(object_details["size"][0]), float(object_details["size"][1])
+    x_fits = sx + margin <= gripper_width
+    y_fits = sy + margin <= gripper_width
+
+    if x_fits and y_fits:
+        return sx, sy
+    if y_fits:
+        return sy, sy
+    if x_fits:
+        return sx, sx
+
+    raise ValueError(
+        f"Object footprint {object_details['size'][:2]} does not fit gripper width "
+        f"{gripper_width} with margin {margin}."
+    )
+
+def valid_grasp_yaw_offsets(object_details, gripper_width, margin=0.0):
+    sx, sy = object_details["size"][0], object_details["size"][1]
+
+    x_fits = sx + margin <= gripper_width
+    y_fits = sy + margin <= gripper_width
+
+    if not x_fits and not y_fits:
+        raise ValueError("Object does not fit gripper in either x or y.")
+
+    offsets = []
+
+    # Grasp across y dimension: object x can hang out
+    if x_fits:
+        offsets += [np.pi / 2, 3 * np.pi / 2]
+
+    # Grasp across x dimension: object y can hang out
+    if y_fits:
+        offsets += [0.0, np.pi]
+
+    return tuple(offsets), x_fits, y_fits
+
+def translational_half_extents(del_geom_x, del_geom_y):
+    """Separate x/y translational coverage for one rectangular TSR bin.
+
+    The old code used one conservative scalar based on the smaller clearance:
+        0.5 * sqrt(2) * min(del_geom_x, del_geom_y)
+    That is safe but throws away useful coverage for long/narrow cuboids.
+    """
+    # print(del_geom_x)
+    # print(del_geom_y)
+    if del_geom_x < 0 or del_geom_y < 0:
+        raise ValueError(
+            f"Negative grasp clearance: del_geom_x={del_geom_x}, "
+            f"del_geom_y={del_geom_y}. Check object size vs gripper width."
+        )
+    return (float(del_geom_x), float(del_geom_y))
+
+def get_del_geoms(clearance_size_x, clearance_size_y, gripper_width):
+    pass
+
+def panda_TSR_parameters(object_details, yaw_buffer, alpha, grasp_strategy="top", min_contact_overlap=0.01):
     object_position = object_details["position"]
     object_size = object_details["size"]
     object_dist = object_details["dist"]
     TSR_params = {}
     # Top TSR params
 
-    # Panda specifications
-    ee_z_offset = 0.02
-    # ee_z_offset = 0
-    s_f = 0.04
+    if grasp_strategy == "top":
 
-    Tew = np.eye(4)
-    Tew[1, 1] = -1
-    Tew[2, 2] = -1
-    Tew[2, 3] = ee_z_offset + object_size[2] / 2
-    # Tew[2, 3] = ee_z_offset + object_size[2] / 4
+        # Panda specifications
+        #ee_z_offset = 0.02
+        ee_z_offset = 0
+        # ee_z_offset = 0
+        s_f = 0.04
 
-    Tews = make_Tew_yaw_variants(Tew)
+        Tew = np.eye(4)
+        Tew[1, 1] = -1
+        Tew[2, 2] = -1
+        Tew[2, 3] = ee_z_offset + object_size[2] / 2
+        # Tew[2, 3] = ee_z_offset + object_size[2] / 4
 
-    del_geom = s_f
-    del_geom_x = s_f - (object_size[0] / 2)
-    del_geom_y = s_f - (object_size[1] / 2)
+        clearance_size_x, clearance_size_y = float(object_details["size"][0]), float(object_details["size"][1])
 
-    Bw = np.array(
-        [
-            [-del_geom_x, del_geom_x],
-            [-del_geom_y, del_geom_y],
-            [0, 0],
-            [0, 0],
-            [0, 0],
-            [0 - yaw_buffer, 0 + yaw_buffer],
-        ]
-    )
+        #yaw_angles = yaw_angles_for_object_grasp(object_details, gripper_width=2 * s_f)
+        yaw_angles, x_fits, y_fits = valid_grasp_yaw_offsets(object_details, 2 * s_f)
+        Tews = make_Tew_yaw_variants(Tew, yaw_angles)
 
-    # Approximating the intersection of all rotated TSR's with a conservative TSR
-    half_side = 0.5 * np.sqrt(2) * 0.5 * min(2 * del_geom_x, 2 * del_geom_y)
+        print(x_fits, y_fits)
+        print(object_details)
 
-    object_dist_check = np.sign(np.array(object_dist))
-    del_Bw = np.array(
-        [
-            (Bw[0, 1] - Bw[0, 0]) / 2,
-            (Bw[1, 1] - Bw[1, 0]) / 2,
-            (Bw[2, 1] - Bw[2, 0]) / 2,
-            (Bw[5, 1] - Bw[5, 0]) / 2,
-        ]
-    )
-    del_Bw = object_dist_check * del_Bw
-    Tw2_w1 = alpha * del_Bw
 
-    yaw_tw2_w1 = (
-        np.array([alpha * half_side, alpha * half_side, Tw2_w1[2]])
-        * object_dist_check[0:3]
-    )
+        if y_fits and not x_fits:
+            long_axis_slide = max(0.0, clearance_size_x / 2 - min_contact_overlap)
+            del_geom_x = long_axis_slide
+            del_geom_y = s_f - clearance_size_y / 2
 
-    # TSR_params["top"] = (Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1)
-    TSR_params["top"] = (Tews, Bw, half_side, Tw2_w1, yaw_tw2_w1)
+        elif x_fits and not y_fits:
+            long_axis_slide = max(0.0, clearance_size_y / 2 - min_contact_overlap)
+            del_geom_y = long_axis_slide
+            del_geom_x = s_f - clearance_size_x / 2
 
-    # Front TSR params
-    obj_offset = np.sqrt(object_size[0] ** 2 + object_size[1] ** 2) / 1
-    l_f = 0.054 / 2
-    ee_offset = l_f * 1.25
+        elif x_fits and y_fits:
+            del_geom_x = s_f - clearance_size_x / 2
+            del_geom_y = s_f - clearance_size_y / 2
 
-    # Tew = np.eye(4)
-    # Tew[1, 1] = -1
-    # Tew[2, 2] = -1
-    # Tew[2, 3] = ee_z_offset + object_position[2]/2
-    # Tew[2, 3] = ee_z_offset + object_size[2]/4
+        else:
+            raise ValueError("Object does not fit the gripper in either x or y.")
 
-    """
-    Tew = np.array([
-        [ np.cos(np.pi/2), 0,  np.sin(np.pi/2), 0],
-        [ 0, 1,  0, 0],
-        [-np.sin(np.pi/2), 0,  np.cos(np.pi/2), 0],
-        [0, 0, 0, 1]
-    ])
-    """
-    Ry90 = np.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]], dtype=float)
-    Rz_m90 = np.array([[0, 1, 0], [-1, 0, 0], [0, 0, 1]], dtype=float)
-    # R_new = Ry90 @ Rz_m90
-    R_new = Ry90
-    Tew = np.eye(4)
-    Tew[:3, :3] = R_new
+        print(del_geom_x)
+        print(del_geom_y)
 
-    # Tew[0, 3] = -1*(ee_offset)
-    ee_offset_eeframe = np.array([0.0, 0.0, -ee_offset])
-    Tew[:3, 3] = R_new @ ee_offset_eeframe
+        Bw = np.array(
+            [
+                [-del_geom_x, del_geom_x],
+                [-del_geom_y, del_geom_y],
+                [0, 0],
+                [0, 0],
+                [0, 0],
+                [0 - yaw_buffer, 0 + yaw_buffer],
+            ]
+        )
 
-    # Tews = make_Tew_x_variants(Tew)
-    Tews = make_Tew_yaw_variants(Tew)
-    # print(f"Tews length: {len(Tews)}")
 
-    del_geom_x = l_f - (object_size[0] / 2)
-    del_geom_y = l_f - (object_size[1] / 2)
+        # Approximating the intersection of all rotated TSR's with a conservative TSR
+        print(del_geom_x)
+        print(del_geom_y)
+        half_side = translational_half_extents(del_geom_x, del_geom_y)
 
-    Bw = np.array(
-        [
-            [-del_geom_x, del_geom_x],
-            [-del_geom_y, del_geom_y],
-            [0, 0],
-            [0 - yaw_buffer, 0 + yaw_buffer],
-            [0, 0],
-            [0, 0],
-        ]
-    )
+        object_dist_check = np.sign(np.array(object_dist))
+        del_Bw = np.array(
+            [
+                (Bw[0, 1] - Bw[0, 0]) / 2,
+                (Bw[1, 1] - Bw[1, 0]) / 2,
+                (Bw[2, 1] - Bw[2, 0]) / 2,
+                (Bw[5, 1] - Bw[5, 0]) / 2,
+            ]
+        )
+        del_Bw = object_dist_check * del_Bw
+        Tw2_w1 = alpha * del_Bw
 
-    # Approximating the intersection of all rotated TSR's with a conservative TSR
-    half_side = 0.5 * np.sqrt(2) * 0.5 * min(2 * del_geom_x, 2 * del_geom_y)
+        yaw_tw2_w1 = (
+            np.array([alpha * xy_half_extents(half_side)[0], alpha * xy_half_extents(half_side)[1], Tw2_w1[2]])
+            * object_dist_check[0:3]
+        )
 
-    object_dist_check = np.sign(np.array(object_dist))
-    del_Bw = np.array(
-        [
-            (Bw[0, 1] - Bw[0, 0]) / 2,
-            (Bw[1, 1] - Bw[1, 0]) / 2,
-            (Bw[2, 1] - Bw[2, 0]) / 2,
-            (Bw[3, 1] - Bw[3, 0]) / 2,
-        ]
-    )
-    del_Bw = object_dist_check * del_Bw
-    Tw2_w1 = alpha * del_Bw
+        #TSR_params["top"] = (Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1)
+        TSR_params = (Tews, Bw, half_side, Tw2_w1, yaw_tw2_w1)
 
-    yaw_tw2_w1 = (
-        np.array([alpha * half_side, alpha * half_side, Tw2_w1[2]])
-        * object_dist_check[0:3]
-    )
+    else:
 
-    # TSR_params["front"] = (Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1)
-    TSR_params["front"] = (Tews, Bw, half_side, Tw2_w1, yaw_tw2_w1)
+        # Front TSR params
+        obj_offset = np.sqrt(object_size[0] ** 2 + object_size[1] ** 2) / 1
+        l_f = 0.054 / 2
+        ee_offset = l_f * 1.25
+
+        # Tew = np.eye(4)
+        # Tew[1, 1] = -1
+        # Tew[2, 2] = -1
+        # Tew[2, 3] = ee_z_offset + object_position[2]/2
+        # Tew[2, 3] = ee_z_offset + object_size[2]/4
+
+        """
+        Tew = np.array([
+            [ np.cos(np.pi/2), 0,  np.sin(np.pi/2), 0],
+            [ 0, 1,  0, 0],
+            [-np.sin(np.pi/2), 0,  np.cos(np.pi/2), 0],
+            [0, 0, 0, 1]
+        ])
+        """
+        Ry90 = np.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]], dtype=float)
+        Rz_m90 = np.array([[0, 1, 0], [-1, 0, 0], [0, 0, 1]], dtype=float)
+        #R_new = Ry90 @ Rz_m90
+        R_new = Ry90
+        Tew = np.eye(4)
+        Tew[:3, :3] = R_new
+
+        # Tew[0, 3] = -1*(ee_offset)
+        ee_offset_eeframe = np.array([0.0, 0.0, -ee_offset])
+        Tew[:3, 3] = R_new @ ee_offset_eeframe
+
+        #Tews = make_Tew_x_variants(Tew)
+        yaw_angles = yaw_angles_for_object_grasp(object_details, gripper_width=2 * l_f)
+        Tews = make_Tew_yaw_variants(Tew, yaw_angles)
+        #print(f"Tews length: {len(Tews)}")
+
+        clearance_size_x, clearance_size_y = effective_xy_size_for_grasp_clearance(
+            object_details, gripper_width=2 * l_f
+        )
+        del_geom_x = l_f - (clearance_size_x / 2)
+        del_geom_y = l_f - (clearance_size_y / 2)
+
+        Bw = np.array(
+            [
+                [-del_geom_x, del_geom_x],
+                [-del_geom_y, del_geom_y],
+                [0, 0],
+                [0 - yaw_buffer, 0 + yaw_buffer],
+                [0, 0],
+                [0, 0],
+            ]
+        )
+
+
+        # Approximating the intersection of all rotated TSR's with a conservative TSR
+        half_side = translational_half_extents(del_geom_x, del_geom_y)
+
+        object_dist_check = np.sign(np.array(object_dist))
+        del_Bw = np.array(
+            [
+                (Bw[0, 1] - Bw[0, 0]) / 2,
+                (Bw[1, 1] - Bw[1, 0]) / 2,
+                (Bw[2, 1] - Bw[2, 0]) / 2,
+                (Bw[3, 1] - Bw[3, 0]) / 2,
+            ]
+        )
+        del_Bw = object_dist_check * del_Bw
+        Tw2_w1 = alpha * del_Bw
+
+        yaw_tw2_w1 = (
+            np.array([alpha * xy_half_extents(half_side)[0], alpha * xy_half_extents(half_side)[1], Tw2_w1[2]])
+            * object_dist_check[0:3]
+        )
+
+        #TSR_params["front"] = (Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1)
+        TSR_params = (Tews, Bw, half_side, Tw2_w1, yaw_tw2_w1)
 
     # return Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1
     return TSR_params
@@ -443,11 +612,15 @@ def fetch_TSR_parameters(object_details, yaw_buffer, alpha):
     Tew[2, 3] = ee_z_offset + object_size[2] / 2
     # Tew[2, 3] = ee_z_offset + object_size[2] / 4
 
-    Tews = make_Tew_yaw_variants(Tew)
+    yaw_angles = yaw_angles_for_object_grasp(object_details, gripper_width=2 * s_f)
+    Tews = make_Tew_yaw_variants(Tew, yaw_angles)
 
     del_geom = s_f
-    del_geom_x = s_f - (object_size[0] / 2)
-    del_geom_y = s_f - (object_size[1] / 2)
+    clearance_size_x, clearance_size_y = effective_xy_size_for_grasp_clearance(
+        object_details, gripper_width=2 * s_f
+    )
+    del_geom_x = s_f - (clearance_size_x / 2)
+    del_geom_y = s_f - (clearance_size_y / 2)
 
     Bw = np.array(
         [
@@ -461,7 +634,7 @@ def fetch_TSR_parameters(object_details, yaw_buffer, alpha):
     )
 
     # Approximating the intersection of all rotated TSR's with a conservative TSR
-    half_side = 0.5 * np.sqrt(2) * 0.5 * min(2 * del_geom_x, 2 * del_geom_y)
+    half_side = translational_half_extents(del_geom_x, del_geom_y)
 
     object_dist_check = np.sign(np.array(object_dist))
     del_Bw = np.array(
@@ -476,7 +649,7 @@ def fetch_TSR_parameters(object_details, yaw_buffer, alpha):
     Tw2_w1 = alpha * del_Bw
 
     yaw_tw2_w1 = (
-        np.array([alpha * half_side, alpha * half_side, Tw2_w1[2]])
+        np.array([alpha * xy_half_extents(half_side)[0], alpha * xy_half_extents(half_side)[1], Tw2_w1[2]])
         * object_dist_check[0:3]
     )
 
@@ -515,12 +688,16 @@ def fetch_TSR_parameters(object_details, yaw_buffer, alpha):
     ee_offset_eeframe = np.array([0.0, 0.0, -ee_offset])
     Tew[:3, 3] = R_new @ ee_offset_eeframe
 
-    # Tews = make_Tew_x_variants(Tew)
-    Tews = make_Tew_yaw_variants(Tew)
-    # print(f"Tews length: {len(Tews)}")
+    #Tews = make_Tew_x_variants(Tew)
+    yaw_angles = yaw_angles_for_object_grasp(object_details, gripper_width=2 * l_f)
+    Tews = make_Tew_yaw_variants(Tew, yaw_angles)
+    #print(f"Tews length: {len(Tews)}")
 
-    del_geom_x = l_f - (object_size[0] / 2)
-    del_geom_y = l_f - (object_size[1] / 2)
+    clearance_size_x, clearance_size_y = effective_xy_size_for_grasp_clearance(
+        object_details, gripper_width=2 * l_f
+    )
+    del_geom_x = l_f - (clearance_size_x / 2)
+    del_geom_y = l_f - (clearance_size_y / 2)
 
     Bw = np.array(
         [
@@ -534,7 +711,7 @@ def fetch_TSR_parameters(object_details, yaw_buffer, alpha):
     )
 
     # Approximating the intersection of all rotated TSR's with a conservative TSR
-    half_side = 0.5 * np.sqrt(2) * 0.5 * min(2 * del_geom_x, 2 * del_geom_y)
+    half_side = translational_half_extents(del_geom_x, del_geom_y)
 
     object_dist_check = np.sign(np.array(object_dist))
     del_Bw = np.array(
@@ -549,7 +726,7 @@ def fetch_TSR_parameters(object_details, yaw_buffer, alpha):
     Tw2_w1 = alpha * del_Bw
 
     yaw_tw2_w1 = (
-        np.array([alpha * half_side, alpha * half_side, Tw2_w1[2]])
+        np.array([alpha * xy_half_extents(half_side)[0], alpha * xy_half_extents(half_side)[1], Tw2_w1[2]])
         * object_dist_check[0:3]
     )
 
@@ -579,16 +756,20 @@ def ur10_TSR_parameters(object_details, yaw_buffer, alpha):
     if object_details["type"] == "box":
         Tew[2, 3] = ee_z_offset + object_size[2] / 2
         del_geom = s_f
-        del_geom_x = s_f - (object_size[0] / 2)
-        del_geom_y = s_f - (object_size[1] / 2)
-    else:  # cylinder
+        clearance_size_x, clearance_size_y = effective_xy_size_for_grasp_clearance(
+            object_details, gripper_width=2 * s_f
+        )
+        del_geom_x = s_f - (clearance_size_x / 2)
+        del_geom_y = s_f - (clearance_size_y / 2)
+    else: #cylinder
         Tew[2, 3] = ee_z_offset + object_size[1] / 2
         del_geom = s_f
         del_geom_x = s_f - (object_size[0])
         del_geom_y = s_f - (object_size[0])
     # Tew[2, 3] = ee_z_offset + object_size[2] / 4
 
-    Tews = make_Tew_yaw_variants(Tew)
+    yaw_angles = yaw_angles_for_object_grasp(object_details, gripper_width=2 * s_f)
+    Tews = make_Tew_yaw_variants(Tew, yaw_angles)
 
     Bw = np.array(
         [
@@ -602,7 +783,7 @@ def ur10_TSR_parameters(object_details, yaw_buffer, alpha):
     )
 
     # Approximating the intersection of all rotated TSR's with a conservative TSR
-    half_side = 0.5 * np.sqrt(2) * 0.5 * min(2 * del_geom_x, 2 * del_geom_y)
+    half_side = translational_half_extents(del_geom_x, del_geom_y)
 
     object_dist_check = np.sign(np.array(object_dist))
     del_Bw = np.array(
@@ -617,7 +798,7 @@ def ur10_TSR_parameters(object_details, yaw_buffer, alpha):
     Tw2_w1 = alpha * del_Bw
 
     yaw_tw2_w1 = (
-        np.array([alpha * half_side, alpha * half_side, Tw2_w1[2]])
+        np.array([alpha * xy_half_extents(half_side)[0], alpha * xy_half_extents(half_side)[1], Tw2_w1[2]])
         * object_dist_check[0:3]
     )
 
@@ -655,11 +836,15 @@ def ur10_TSR_parameters(object_details, yaw_buffer, alpha):
     ee_offset_eeframe = np.array([0.0, 0.0, -ee_offset])
     Tew[:3, 3] = R_new @ ee_offset_eeframe
 
-    # Tews = make_Tew_x_variants(Tew)
-    Tews = make_Tew_yaw_variants(Tew)
+    #Tews = make_Tew_x_variants(Tew)
+    yaw_angles = yaw_angles_for_object_grasp(object_details, gripper_width=2 * l_f)
+    Tews = make_Tew_yaw_variants(Tew, yaw_angles)
 
-    del_geom_x = l_f - (object_size[0] / 2)
-    del_geom_y = l_f - (object_size[1] / 2)
+    clearance_size_x, clearance_size_y = effective_xy_size_for_grasp_clearance(
+        object_details, gripper_width=2 * l_f
+    )
+    del_geom_x = l_f - (clearance_size_x / 2)
+    del_geom_y = l_f - (clearance_size_y / 2)
 
     Bw = np.array(
         [
@@ -673,7 +858,7 @@ def ur10_TSR_parameters(object_details, yaw_buffer, alpha):
     )
 
     # Approximating the intersection of all rotated TSR's with a conservative TSR
-    half_side = 0.5 * np.sqrt(2) * 0.5 * min(2 * del_geom_x, 2 * del_geom_y)
+    half_side = translational_half_extents(del_geom_x, del_geom_y)
 
     object_dist_check = np.sign(np.array(object_dist))
     del_Bw = np.array(
@@ -688,7 +873,7 @@ def ur10_TSR_parameters(object_details, yaw_buffer, alpha):
     Tw2_w1 = alpha * del_Bw
 
     yaw_tw2_w1 = (
-        np.array([alpha * half_side, alpha * half_side, Tw2_w1[2]])
+        np.array([alpha * xy_half_extents(half_side)[0], alpha * xy_half_extents(half_side)[1], Tw2_w1[2]])
         * object_dist_check[0:3]
     )
 
@@ -698,6 +883,436 @@ def ur10_TSR_parameters(object_details, yaw_buffer, alpha):
     # return Tew, Bw, half_side, Tw2_w1, yaw_tw2_w1
     return TSR_params
 
+def rmin_rmax_from_xy_interval(x_interval, y_interval, origin=(0.0, 0.0)):
+    ox, oy = origin
+
+    xmin, xmax = x_interval
+    ymin, ymax = y_interval
+
+    corners = np.array([
+        [xmin, ymin],
+        [xmin, ymax],
+        [xmax, ymin],
+        [xmax, ymax],
+    ], dtype=float)
+
+    dists = np.linalg.norm(corners - np.array([ox, oy]), axis=1)
+    rmax = float(np.max(dists))
+
+    # For rmin, closest point in rectangle to origin
+    closest_x = np.clip(ox, xmin, xmax)
+    closest_y = np.clip(oy, ymin, ymax)
+    rmin = float(np.linalg.norm([closest_x - ox, closest_y - oy]))
+
+    return rmin, rmax
+
+def tile_in_reachable_annulus(tile, robot_pos, inner_rad, outer_rad):
+    rmin, rmax = rmin_rmax_from_xy_interval(
+        tile["x"],
+        tile["y"],
+        origin=(robot_pos[0], robot_pos[1]),
+    )
+
+    return (rmin <= outer_rad) and (rmax >= inner_rad)
+
+def tile_inside_intervals(tile, intervals):
+
+    if not intervals:
+        return True
+
+    xmin, xmax = intervals[0]
+    ymin, ymax = intervals[1]
+
+    return (
+        min(tile["x"]) >= xmin and
+        max(tile["x"]) <= xmax and
+        min(tile["y"]) >= ymin and
+        max(tile["y"]) <= ymax
+    )
+
+def tile_center(tile):
+    return {
+        dim: 0.5 * (bounds[0] + bounds[1])
+        for dim, bounds in tile.items()
+    }
+
+
+def tile_center_inside_intervals(tile, intervals):
+    """
+    Check only whether the tile center lies inside the allowed XY intervals.
+
+    intervals format:
+        [[xmin, xmax], [ymin, ymax]]
+
+    This does NOT check whether the full object footprint is inside.
+    """
+    if not intervals:
+        return True
+
+    xmin, xmax = intervals[0]
+    ymin, ymax = intervals[1]
+
+    center = tile_center(tile)
+    cx = center["x"]
+    cy = center["y"]
+
+    return xmin <= cx <= xmax and ymin <= cy <= ymax
+
+def create_TCR_set(env, batch_idx=None):
+    env_details = env.env_details
+    object_details = env.object_details
+    grasp_details = env.grasp_details
+
+    env_name = env.env_details['env_name']
+
+    # print(f"tcr_intervals first: {grasp_details['tcr_intervals']}")
+    if batch_idx is not None:
+        tcr_intervals = grasp_details['tcr_intervals'][batch_idx]
+    else:
+        tcr_intervals = grasp_details['tcr_intervals']
+    # print(f"tcr_intervals: {tcr_intervals}")
+    variation = object_details['variation']
+
+    # print(env_details['intervals'])
+
+    # print(f"tcr_intervals: {tcr_intervals}")
+
+    bin_widths = {}
+    for bin_name, bin_intervals in tcr_intervals.items():
+        if len(bin_intervals)==1:
+            bin_widths[bin_name] = 0
+            continue
+        bin_widths[bin_name] = bin_intervals[2] - bin_intervals[0]
+
+    # print(f"bin_widths: {bin_widths}")
+    
+    z_corrections = env.env_details.get("z_correction", [0])
+
+    base_zmin = variation["z"][0][0]
+    base_zmax = variation["z"][0][1]
+
+    variation["z"] = [
+        [base_zmin + dz, base_zmax + dz]
+        for dz in z_corrections
+    ]
+
+    regions = {
+        'x': variation['x'],
+        'y': variation['y'],
+        'z': variation['z'],
+        'yaw': variation['yaw'],
+    }
+
+    if env_name == "microwave":
+        regions['door'] = variation['door']
+
+    print(f"regions: {regions}")    
+    
+    # tiles = list(tile_region(regions, bin_widths))
+    # tiles, n_tiles = tile_region(regions, bin_widths)
+
+    per_dim_bins, n_tiles = find_bins_per_dim(regions, bin_widths)
+
+    valid_tiles = []
+    robot_pos = env_details['robot_pos']
+    inner_rad = env_details['inner_rad']
+    outer_rad = env_details['outer_rad']
+    robot = env_details['robot']
+
+    env_name = env.env_details['env_name']
+    if env_name != "free":
+        intervals = env.env_details['intervals']
+    else:
+        intervals = None
+
+    x_bins = per_dim_bins["x"]
+    y_bins = per_dim_bins["y"]
+    z_bins = per_dim_bins["z"]
+    yaw_bins = per_dim_bins["yaw"]
+    door_bins = per_dim_bins.get("door", [None])
+
+    xy_total = len(x_bins) * len(y_bins)
+    expand_count = len(z_bins) * len(yaw_bins) * len(door_bins)
+
+    with tqdm(total=n_tiles, desc="Validating Task Set") as pbar:
+        for x_bin, y_bin in itertools.product(x_bins, y_bins):
+            xy_tile = {
+                "x": x_bin,
+                "y": y_bin,
+            }
+
+            valid_xy = True
+
+            if not tile_in_reachable_annulus(xy_tile, robot_pos, inner_rad, outer_rad):
+                valid_xy = False
+
+            if env_name in {"largeobj"}:
+                inside = tile_center_inside_intervals(xy_tile, intervals)
+            else:
+                inside = tile_inside_intervals(xy_tile, intervals)
+
+            if not inside:
+                valid_xy = False
+
+            # if valid_xy:
+            #     for z_bin, yaw_bin, door_bin in itertools.product(z_bins, yaw_bins, door_bins):
+            #         tile = {
+            #             "x": x_bin,
+            #             "y": y_bin,
+            #             "z": z_bin,
+            #             "yaw": yaw_bin,
+            #         }
+
+            #         if door_bin is not None:
+            #             tile["door"] = door_bin
+
+            #         valid_tiles.append(tile)
+            # pbar.update(expand_count)
+            
+            if not valid_xy:
+                pbar.update(expand_count)
+                continue
+
+            for yaw_bin, door_bin in itertools.product(yaw_bins, door_bins):
+
+                if env_name == "microwave":
+                    if robot == "panda":
+                        outer_scale_val = 0.75
+                    elif robot == "fetch":
+                        outer_scale_val = 0.65
+                    else:
+                        raise NotImplementedError(f"Unsupported robot for task validation: {robot} ")
+
+                    if not microwave_handle_filter(
+                        x_bin,
+                        y_bin,
+                        yaw_bin,
+                        door_bin,
+                        env,
+                        dot_min=0.0,
+                        outer_rad_scale=outer_scale_val,
+                    ):
+                        pbar.update(len(z_bins))
+                        continue
+
+                for z_bin in z_bins:
+                    tile = {
+                        "x": x_bin,
+                        "y": y_bin,
+                        "z": z_bin,
+                        "yaw": yaw_bin,
+                    }
+
+                    if door_bin is not None:
+                        tile["door"] = door_bin
+
+
+                    if door_bin is None:
+                        TCR = (
+                            tuple(x_bin),
+                            tuple(y_bin),
+                            tuple(z_bin),
+                            tuple(yaw_bin)
+                        )
+                    else:
+                        TCR = (
+                            tuple(x_bin),
+                            tuple(y_bin),
+                            tuple(z_bin),
+                            tuple(yaw_bin),
+                            tuple(door_bin)
+                        )
+                    valid_tiles.append(TCR)
+
+                    # valid_tiles.append(tile)
+
+                pbar.update(len(z_bins))
+            
+
+    print(f"valid tiles: {len(valid_tiles)} / {n_tiles}")
+
+    TCR_set = tiles_to_iTSR_set(env, valid_tiles)
+    return TCR_set
+
+def yaw_rot_2d(theta):
+    c = np.cos(theta)
+    s = np.sin(theta)
+    return np.array([
+        [c, -s],
+        [s,  c],
+    ], dtype=float)
+
+
+def bin_mid(bin_):
+    return 0.5 * (float(bin_[0]) + float(bin_[1]))
+
+
+def microwave_handle_pose_xy(x_bin, y_bin, yaw_bin, door_bin, env):
+    x = bin_mid(x_bin)
+    y = bin_mid(y_bin)
+    yaw = bin_mid(yaw_bin)
+    door_phi = bin_mid(door_bin)
+
+    hinge_xy = np.array(
+        env.object_details["hinge_pos_body"][:2],
+        dtype=float,
+    )
+
+    door_origin_xy = np.array(
+        env.object_details["door_origin_closed_body"][:2],
+        dtype=float,
+    )
+
+    handle_pos_door_xy = np.array(
+        env.object_details["handle_pos_door"][:2],
+        dtype=float,
+    )
+
+    R_body = yaw_rot_2d(yaw)
+    R_door = yaw_rot_2d(-door_phi)
+
+    handle_body_xy = (
+        hinge_xy
+        + R_door @ (door_origin_xy + handle_pos_door_xy)
+    )
+
+    handle_world_xy = np.array([x, y], dtype=float) + R_body @ handle_body_xy
+
+    # Your microwave front/outward direction in the CLOSED door frame.
+    # Since the front is at negative body x, outward from inside microwave
+    # through the door is local -x.
+    handle_normal_door = np.array([-1.0, 0.0], dtype=float)
+
+    handle_normal_world = R_body @ R_door @ handle_normal_door
+    handle_normal_world /= np.linalg.norm(handle_normal_world) + 1e-9
+
+    return handle_world_xy, handle_normal_world
+
+def microwave_handle_filter(
+    x_bin,
+    y_bin, 
+    yaw_bin, 
+    door_bin, 
+    env,
+    dot_min=0.0,
+    outer_rad_scale=0.75
+):
+    
+    pass
+
+    robot = env.env_details['robot']
+
+    if robot in {"panda", "fetch"}:
+        pass
+        handle_pos_xy, handle_normal_xy = microwave_handle_pose_xy(
+            x_bin,
+            y_bin,
+            yaw_bin,
+            door_bin,
+            env,
+        )
+        robot_xy = np.array(env.env_details['robot_pos'][:2], dtype=float)
+        to_robot = robot_xy - handle_pos_xy
+        dist = np.linalg.norm(to_robot)
+
+        if dist < 1e-9:
+            return True
+        
+        to_robot = to_robot / dist
+        dot = np.dot(handle_normal_xy, to_robot)
+
+        # Case 1: handle is facing robot
+        if dot >= dot_min:
+            return True
+        # else:
+        #     return False
+        
+        # Case 2: handle is not facing robot but might be reachable
+        inner_rad = env.env_details["inner_rad"]
+        outer_rad = env.env_details["outer_rad"]
+        close_outer_rad = outer_rad_scale * outer_rad
+
+        return inner_rad <= dist <= close_outer_rad
+        
+    else:
+        raise ValueError(f"Microwave handle check not supported for robot: {robot}")
+
+
+
+def tile_center_radius(tile, robot_pos):
+    cx = 0.5 * (tile["x"][0] + tile["x"][1])
+    cy = 0.5 * (tile["y"][0] + tile["y"][1])
+
+    dx = cx - robot_pos[0]
+    dy = cy - robot_pos[1]
+
+    return np.sqrt(dx * dx + dy * dy), cx, cy
+
+def tiles_to_iTSR_set(env, valid_tiles):
+    return {key: None for key in valid_tiles}
+
+def tile_1d(intervals, width, eps=1e-9):
+    """
+    intervals: [[lo, hi], [lo2, hi2], ...]
+    width: bin width for this dimension
+    """
+    bins = []
+
+    for lo, hi in intervals:
+        lo = float(lo)
+        hi = float(hi)
+
+        # fixed dimension, e.g. z = 0.075
+        if abs(hi - lo) < eps:
+            bins.append([round(lo, 5), round(hi, 5)])
+            continue
+
+        if width <= eps:
+            raise ValueError(f"Nonzero interval [{lo}, {hi}] needs positive width, got {width}")
+
+        edges = np.arange(lo, hi, width).tolist()
+
+        for a in edges:
+            b = min(a + width, hi)
+            bins.append([round(a, 5), round(b, 5)])
+
+    return bins
+
+def tile_region(regions, bin_widths):
+    per_dim_bins = {
+        dim: tile_1d(intervals, bin_widths[dim])
+        for dim, intervals in regions.items()
+    }
+
+    n_tiles = 1
+    for dim, bins in per_dim_bins.items():
+        print(f"{dim}: {len(bins)} bins")
+        n_tiles *= len(bins)
+
+    print(f"total tiles: {n_tiles}")
+
+    dims = list(per_dim_bins.keys())
+
+    def generator():
+        for combo in itertools.product(*(per_dim_bins[d] for d in dims)):
+            yield dict(zip(dims, combo))
+
+    return generator(), n_tiles
+
+def find_bins_per_dim(regions, bin_widths):
+    per_dim_bins = {
+        dim: tile_1d(intervals, bin_widths[dim])
+        for dim, intervals in regions.items()
+    }
+
+    n_tiles = 1
+    for dim, bins in per_dim_bins.items():
+        print(f"{dim}: {len(bins)} bins")
+        n_tiles *= len(bins)
+
+    print(f"total tiles: {n_tiles}")
+    
+    return per_dim_bins, n_tiles
 
 def find_yaw_iTSR_set(object_details, problem_details, Tw2_w1):
 
@@ -745,8 +1360,8 @@ def find_yaw_iTSR_set(object_details, problem_details, Tw2_w1):
 
             B12_yaw_intersect = np.array(
                 [
-                    [tw2_0[0] - half_side, tw2_0[0] + half_side],
-                    [tw2_0[1] - half_side, tw2_0[1] + half_side],
+                    [tw2_0[0] - xy_half_extents(half_side)[0], tw2_0[0] + xy_half_extents(half_side)[0]],
+                    [tw2_0[1] - xy_half_extents(half_side)[1], tw2_0[1] + xy_half_extents(half_side)[1]],
                     [0, 0],
                     [0, 0],
                     [0, 0],
@@ -833,8 +1448,9 @@ def find_iTSR_set(
                 dims.append(0)
 
         if dims[0] == 1 and dims[1] == 1:
-            yaw_tw2_w1_x = np.array([alpha * half_side, 0, 0])
-            yaw_tw2_w1_y = np.array([0, alpha * half_side, 0])
+            x_half, y_half = xy_half_extents(half_side)
+            yaw_tw2_w1_x = np.array([alpha * x_half, 0, 0])
+            yaw_tw2_w1_y = np.array([0, alpha * y_half, 0])
 
         x_covered = True
         iTSR_set = {}
@@ -1038,13 +1654,13 @@ def find_iTSR_set(
                     + (tw1_0[1] - object_position[1]) ** 2
                 )
 
-                # rmin, rmax = rmin_rmax_from_square_corners(
+                #rmin, rmax = rmin_rmax_from_rectangle_corners_2d(
                 #    tw1_0, tw2_0, nominal_pose=robot_pos
                 # )
 
-                if problem["robot"] == "fetch":
-                    # print("Using 2D check")
-                    rmin, rmax = rmin_rmax_from_square_corners(
+                if problem['robot'] == 'fetch':
+                    #print("Using 2D check")
+                    rmin, rmax = rmin_rmax_from_rectangle_corners_2d(
                         tw1_0, tw2_0, nominal_pose=robot_pos
                     )
                 else:
