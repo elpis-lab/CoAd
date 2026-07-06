@@ -35,7 +35,7 @@ class MujocoRobot:
         self.viewer = None
         if visualize:
             self.viewer = mujoco.viewer.launch_passive(
-                self.model, self.data, show_left_ui=False, show_right_ui=False
+                self.model, self.data, show_left_ui=True, show_right_ui=True
             )
             self.viewer.sync()
 
@@ -125,6 +125,10 @@ class Panda(MujocoRobot):
         "joint7",
     ]
     HOME_POS = [0, 0, 0, -np.pi / 2, 0, np.pi / 2, -np.pi / 4]
+
+    # Home pose for under table
+    HOME_POS = [-1.6362, -1.7276, 2.151, -1.0680, -2.2128, 2.4997, 1.1928]
+
     FINGER = ["finger_joint1", "finger_joint2"]
     FINGER_OPEN = [0.04, 0.04]
     FINGER_CLOSED = [0.0, 0.0]
@@ -265,6 +269,7 @@ class UR10(MujocoRobot):
     # HOME_POS = [0, -1.7, 2, -1.87, -np.pi / 2, 0]
     HOME_POS = [0, -1.7, 1.75, -1.9, -np.pi / 2, 0]
     HOME_POS = [2.0309, -1.095, 1.5799, -2.071, -1.5938, 0.5060]
+
     FINGER = ["rh_r1", "rh_l1", "rh_r2", "rh_l2"]
     FINGER_OPEN = [0, 0, 0, 0]
     FINGER_CLOSED = [1.12, 1.12, 1.12, 1.12]
@@ -302,6 +307,9 @@ class FetchArm(MujocoRobot):
     FINGER_CLOSED = [0, 0]
     FINGER_OPEN = [0.05, 0.05]
     HOME_POS = [0, -1.5, 0, -np.pi, -np.pi / 2, 0, 0, 0]
+
+    # Harder home pose
+    HOME_POS = [0.1, 1.32, 1.4, -0.2, 1.72, 0, 1.66, 0.1]
 
     def __init__(self, model, data=None, visualize=False):
         """Initialize FetchRobot"""
