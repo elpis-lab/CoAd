@@ -196,20 +196,14 @@ def evaluate_adaptations(
     key_to_roots = []
     root_paths_list = []
 
-    # Setup grids for base library and adaptations
+    # Setup grids for adaptations only
     indexers = []
-    indexers.append(BoxGrid(task_set))
-
-    full_lib_success = []
-    full_lib_times = []
-    full_lib_lengths = []
 
     adaptation_success = {}
     adaptation_times = {}
     adaptation_lengths = {}
 
     lib_sizes = {}
-    lib_sizes["full"] = len(solved_task_paths_keys)
 
     for adaptation in adaptations:
 
@@ -256,36 +250,10 @@ def evaluate_adaptations(
         # env.move_cube_object(sample)
         env.move_object(sample)
 
-        # Benchmark full library
-        full_start = time.perf_counter()
-        recovered_key_full = indexers[0].query_point(sample)
-
-        if recovered_key_full is None:
-            print("full library failure")
-
-            full_lib_success.append(False)
-            full_end = time.perf_counter()
-            full_lib_times.append(full_end - full_start)
-            full_lib_lengths.append(np.nan)
-        else:
-            if key != recovered_key_full:
-                print(f"Original key: {key}")
-                print(f"Full library recovered key: {recovered_key_full}")
-
-                input()
-
-            full_lib_path = task_paths[recovered_key_full]
-            full_end = time.perf_counter()
-            full_lib_success.append(True)
-            full_lib_times.append(full_end - full_start)
-            full_lib_lengths.append(traj_len(full_lib_path))
-
         # Benchmark each adaptation
         for adaptation_ind, adaptation in enumerate(adaptations):
             adapt_start = time.perf_counter()
-            recovered_key_adapt = indexers[adaptation_ind + 1].query_point(
-                sample
-            )
+            recovered_key_adapt = indexers[adaptation_ind].query_point(sample)
             if recovered_key_adapt is None:
                 adaptation_success[adaptation].append(False)
                 adapt_end = time.perf_counter()
@@ -314,16 +282,6 @@ def evaluate_adaptations(
 
         pbar.update(1)
 
-    full_lib_success = np.array(full_lib_success)
-    full_lib_times = np.array(full_lib_times)
-    full_lib_lengths = np.array(full_lib_lengths)
-
-    print()
-    print(f"\nFull library results")
-    print(f"Full library success rate: {np.mean(full_lib_success)*100}%")
-    print(f"Full library mean time: {np.mean(full_lib_times)*1000} ms")
-    print(f"Full library mean length: {np.nanmean(full_lib_lengths)}")
-
     for adaptation in adaptations:
         adaptation_success[adaptation] = np.array(
             adaptation_success[adaptation]
@@ -334,9 +292,7 @@ def evaluate_adaptations(
         )
 
         print(f"\n{adaptation} results")
-        curr_compression_ratio = lib_sizes[adaptation] / lib_sizes["full"]
-        curr_comp_percent = (1 - curr_compression_ratio) * 100
-        print(f"{adaptation} compression %: {curr_comp_percent}%")
+        print(f"{adaptation} library size: {lib_sizes[adaptation]}")
         print(
             f"{adaptation} success rate: {np.mean(adaptation_success[adaptation])*100}%"
         )
@@ -349,11 +305,6 @@ def evaluate_adaptations(
 
     results_path = f"data/adaptation_results_{args.robot}_{args.env}.npz"
     results = {
-        "full": {
-            "success": full_lib_success,
-            "times": full_lib_times,
-            "lengths": full_lib_lengths,
-        },
         "adaptations": {
             "success": adaptation_success,
             "times": adaptation_times,

@@ -21,7 +21,7 @@ from experiments.visualize_paths import traj_len
 from coad.utils import set_seed, load_env_and_robot, get_data_folder
 from coad.planning import OMPLPlanner, euclidean_path_length
 
-from coad.env import FreeEnv, CageEnv, BoxEnv, TableEnv, ShelfEnv
+from coad.env import FreeEnv, CageEnv, BoxEnv, TableEnv, ShelfEnv, LargeObjectEnv, MicrowaveEnv, AllStableEnv
 from coad.robot import Panda, UR10, FetchArm
 
 
@@ -736,7 +736,8 @@ def evaluate_graph(
             x = np.nextafter(x, lo)
             sample.append(x)
 
-        env.move_cube_object(sample)
+        # env.move_cube_object(sample)
+        env.move_object(sample)
         recovered_key = indexers[0].query_point(sample)  # pick one
         # _, key_goal = key_to_roots[0][recovered_key]
         key_goal = solved_task_paths[recovered_key][-1]
@@ -981,15 +982,17 @@ def main(args):
     visualize = False
 
     if env_name == "table":
-        env = TableEnv(robot_name, no_sv=True)
+        env = TableEnv(robot_name, using_swept_volume=False)
     elif env_name == "box":
-        env = BoxEnv(robot_name, no_sv=True)
+        env = BoxEnv(robot_name, using_swept_volume=False)
     elif env_name == "cage":
-        env = CageEnv(robot_name, no_sv=True)
+        env = CageEnv(robot_name, using_swept_volume=False)
     elif env_name == "shelf":
-        env = ShelfEnv(robot_name, no_sv=True)
+        env = ShelfEnv(robot_name, using_swept_volume=False)
     elif env_name == "free":
-        env = FreeEnv(robot_name, no_sv=True)
+        env = FreeEnv(robot_name, using_swept_volume=False)
+    elif env_name == "largeobj":
+        env = LargeObjectEnv(robot_name, using_swept_volume=False)
     else:
         raise ValueError(f"Invalid environment: {env_name}")
 
@@ -1003,7 +1006,9 @@ def main(args):
     else:
         raise ValueError(f"Invalid robot: {robot_name}")
 
-    robot.teleport_base(pos=env.robot_pos, quat=env.robot_quat)
+    robot_pos = env.env_details['robot_pos']
+    robot_quat = env.env_details['robot_quat']
+    robot.teleport_base(pos=robot_pos, quat=robot_quat)
 
     # root_data = pickle.load(open(root_path, "rb"))
     # map_data = pickle.load(open(map_path, "rb"))
@@ -1038,9 +1043,16 @@ def parse_arguments():
     # envs
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument(
-        "--env",
-        choices=["table", "box", "cage", "shelf", "free"],
-        default="table",
+        "--env", choices=[
+            "table",
+            "box",
+            "cage",
+            "shelf",
+            "free"
+            "largeobj",
+            "microwave",
+            "allstable"
+            ], default="table",
     )
     parser.add_argument(
         "--robot", choices=["panda", "ur10", "fetch"], default="panda"
