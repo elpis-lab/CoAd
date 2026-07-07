@@ -1048,7 +1048,7 @@ def parse_arguments():
             "box",
             "cage",
             "shelf",
-            "free"
+            "free",
             "largeobj",
             "microwave",
             "allstable"
