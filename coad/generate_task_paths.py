@@ -304,7 +304,7 @@ def main(args):
         return
 
     # Load environment and robot
-    env, robot = load_env_and_robot(args.env, args.robot, visualize=True)
+    env, robot = load_env_and_robot(args.env, args.robot, visualize=False)
 
     # Solve problems
     # Load the joint space problem set

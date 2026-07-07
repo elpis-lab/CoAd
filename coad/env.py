@@ -2988,9 +2988,12 @@ class LargeObjectEnv(MujocoEnv):
         robot_pos = config_yaml_data['base_offset']['position']
         robot_quat = super().quat_xyzw_to_wxyz(config_yaml_data['base_offset']['orientation'])
 
+        if robot=="fetch":
+            robot_pos = [robot_pos[0]-0.05, robot_pos[1], robot_pos[2]]
+
         if robot == "panda" or robot == "fetch":
             inner_rad = 0.3
-            outer_rad = 0.7
+            outer_rad = 0.75
         elif robot == "ur10":
             inner_rad = 0.3
             outer_rad = 0.75
@@ -3065,7 +3068,8 @@ class MicrowaveEnv(MujocoEnv):
 
         if robot == "panda" or robot == "fetch":
             inner_rad = 0.3
-            outer_rad = 0.8
+            #outer_rad = 0.8
+            outer_rad = 0.7
         elif robot == "ur10":
             inner_rad = 0.3
             outer_rad = 0.75

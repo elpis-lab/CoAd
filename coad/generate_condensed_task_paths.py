@@ -7,16 +7,16 @@ import numpy as np
 import pickle
 from tqdm import tqdm
 
-from plan_load.utils import set_seed, load_env_and_robot, get_data_folder
-from plan_load.task_space import build_task_nn
-from plan_load.env import MujocoEnv
-from plan_load.robot import MujocoRobot
-from plan_load.mink_ik import get_ik_solver
+from coad.utils import set_seed, load_env_and_robot, get_data_folder
+from coad.task_space import build_task_nn
+from coad.env import MujocoEnv
+from coad.robot import MujocoRobot
+from coad.mink_ik import get_ik_solver
 
-from plan_load.adaptation import LinearAdapter, GRRAdapter
-from plan_load.adaptation import DMPAdapter, TrajOptAdapter
+from coad.adaptation import LinearAdapter, GRRAdapter
+from coad.adaptation import DMPAdapter, TrajOptAdapter
 
-from plan_load.planning import OMPLPlanner
+from coad.planning import OMPLPlanner
 
 def solve_joint_goal_set_condensed(
     env: MujocoEnv,
@@ -399,7 +399,7 @@ def main(args):
         return
 
     # Load environment and robot
-    env, robot = load_env_and_robot(args.env, args.robot, True)
+    env, robot = load_env_and_robot(args.env, args.robot, False)
 
     # Solve problems
     # Load the joint space problem set

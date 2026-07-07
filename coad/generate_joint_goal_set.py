@@ -270,7 +270,7 @@ def convert_task_to_joint_goal(
             # input("Proceed?")
 
         # Update tqdm message periodically
-        print_interval = 10
+        print_interval = 1000
         if (i + 1) % print_interval == 0:
             m_ik = np.nanmean(ik_times[np.array(ik_success)])
             tqdm.write(
@@ -299,7 +299,7 @@ def main(args):
         return
 
     # Load environment and robot
-    env, robot = load_env_and_robot(args.env, args.robot, visualize=True)
+    env, robot = load_env_and_robot(args.env, args.robot, visualize=False)
 
     # Solve problems
     # Load the task set
