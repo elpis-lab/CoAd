@@ -279,7 +279,7 @@ def solve_joint_goal_set(
     # Solve problems
     if "PRM" in planner:
         solution_paths, results = solve_batch(
-            env, robot, home_qpos, joint_goal_set, ompl_planner, 20
+            env, robot, home_qpos, joint_goal_set, ompl_planner, 30
         )
     else:
         solution_paths, results = solve_individual(

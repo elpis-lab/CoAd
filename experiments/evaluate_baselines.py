@@ -42,6 +42,11 @@ class BoxGrid:
         mins = keys[:, :, 0].copy()
         maxs = keys[:, :, 1].copy()
 
+        self.x_global_min = np.min(mins[:, 0])
+        self.x_global_max = np.max(maxs[:, 0])
+        self.y_global_min = np.min(mins[:, 1])
+        self.y_global_max = np.max(maxs[:, 1])
+
         # Wrap yaw into [-pi, pi)
         mins[:, 3] = self._wrap_pi(mins[:, 3])
         maxs[:, 3] = self._wrap_pi(maxs[:, 3])
@@ -108,23 +113,28 @@ class BoxGrid:
         x, y, z, yaw = sample
         yaw = self._wrap_pi(yaw)
 
+        if x < self.x_global_min or x >= self.x_global_max:
+            return None
+
+        if y < self.y_global_min or y >= self.y_global_max:
+            return None
+
         ix = int(np.searchsorted(self.x_mins, x, side="right") - 1)
         iy = int(np.searchsorted(self.y_mins, y, side="right") - 1)
 
-        # clamp to valid range
-        ix = min(max(ix, 0), len(self.x_mins) - 1)
-        iy = min(max(iy, 0), len(self.y_mins) - 1)
-
-        if ix < 0 or ix >= self.nx or iy < 0 or iy >= self.ny:
+        if ix < 0 or ix >= self.nx:
             return None
 
-        iz = int(np.argmin(np.abs(self.z_values - z)))  # discrete levels
+        if iy < 0 or iy >= self.ny:
+            return None
+
+        iz = int(np.argmin(np.abs(self.z_values - z)))
 
         rel = self._wrap_pi(yaw - self.yaw0)
         iyaw = int(np.floor(rel / self.dyaw + eps)) % self.nyaw
 
         return ix, iy, iz, iyaw
-
+    
     def query_point(self, sample):
         indices = self._bin_indices(sample)
         if indices is None:
@@ -625,7 +635,7 @@ def evaluate_graph(
 ):
     model, data = robot.model, robot.data
     home_qpos = robot.get_joint_qpos()
-    ik_solver = get_ik_solver(robot, env_collision_geoms=env.collision_geoms)
+    ik_solver = get_ik_solver(robot, env_collision_geoms=env.env_details['collision_geoms'])
     # No task_paths/base-library file is loaded here.
     # Sampling and baseline goals are derived from the first adaptation's key_to_root.
 
@@ -730,19 +740,32 @@ def evaluate_graph(
         key_ind = np.random.randint(0, len(solved_keys))
         key = solved_keys[key_ind]
 
+        print(f"Key sampled: {key}")
+
+
         sample = []
         for lo, hi in key:
             x = np.random.uniform(lo, hi)
             x = np.nextafter(x, lo)
             sample.append(x)
 
+        print(f"Sample: {sample}")
+
         # env.move_cube_object(sample)
         env.move_object(sample)
+
         recovered_key = reference_indexer.query_point(sample)
         if recovered_key is None:
             continue
-
+        # recovered_key = key
+        
         _, key_goal = reference_key_to_root[recovered_key]
+
+        if robot.viewer is not None:
+            print(f"Key: {recovered_key}")
+            robot.set_joint_qpos(key_goal)
+            robot.viewer.sync()
+            input()
 
         for adaptation_ind, adaptation in enumerate(adaptations):
             adapt_start = time.perf_counter()
@@ -975,7 +998,7 @@ def main(args):
 
     env_name = args.env
     robot_name = args.robot
-    visualize = False
+    visualize = True
 
     if env_name == "table":
         env = TableEnv(robot_name, using_swept_volume=False)

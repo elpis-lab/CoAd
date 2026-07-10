@@ -181,12 +181,14 @@ class MujocoEnv:
                 long_axis_slide = max(0.0, clearance_size_x / 2.0 - min_contact_overlap)
                 del_geom_x = long_axis_slide
                 del_geom_y = half_finger_clearance - clearance_size_y / 2.0
+                del_geom_y /= 1.0
 
             elif x_fits and not y_fits:
                 # Long object along y, narrow along x.
                 long_axis_slide = max(0.0, clearance_size_y / 2.0 - min_contact_overlap)
                 del_geom_y = long_axis_slide
                 del_geom_x = half_finger_clearance - clearance_size_x / 2.0
+                del_geom_x /= 1.0
 
             elif x_fits and y_fits:
                 # Object fits both ways. Pick a consistent convention.
@@ -197,6 +199,8 @@ class MujocoEnv:
             else:
                 raise ValueError("Object does not fit the gripper in either x or y.")
 
+            print(f"xfits: {x_fits}")
+            print(f"yfits: {y_fits}")
 
             del_geom_x, del_geom_y = translational_half_extents(
                 del_geom_x,
@@ -434,8 +438,16 @@ class MujocoEnv:
         # Generalize to more objects later
         object_xml = self.object_xml(new_object_size, [1, 1, 0, 0], temp=True)
         
-        free_xml_path = f"{robot_dir}/temp_scene.xml"
-        tempModel, tempData = self.build_model(free_xml_path, [object_xml])
+        # free_xml_path = f"{robot_dir}/temp_scene.xml"
+        # tempModel, tempData = self.build_model(free_xml_path, [object_xml])
+        free_xml_path = (
+            f"{robot_dir}/temp_scene_{os.getpid()}.xml"
+        )
+
+        tempModel, tempData = self.build_model(
+            free_xml_path,
+            [object_xml],
+        )
 
         visualizeTemp = False
         if self.env_details['robot'] == "panda":
@@ -1011,6 +1023,15 @@ class MujocoEnv:
         xml_path: desired path for model's xml
         xmls_to_add: list of xml fragments containing <asset> and/or <body>
         """
+
+        xml_path = Path(xml_path)
+
+        unique_xml_path = xml_path.with_name(
+            f"{xml_path.stem}_{os.getpid()}{xml_path.suffix}"
+        )
+
+        # Use the unique path from this point onward.
+        xml_path = str(unique_xml_path)
 
         asset_blocks = []
         body_blocks = []
@@ -2991,7 +3012,13 @@ class LargeObjectEnv(MujocoEnv):
         if robot=="fetch":
             robot_pos = [robot_pos[0]-0.05, robot_pos[1], robot_pos[2]]
 
-        if robot == "panda" or robot == "fetch":
+        if robot == "panda":
+            # inner_rad = 0.3
+            # outer_rad = 0.7
+            inner_rad = 0.3
+            outer_rad = 0.544
+            outer_rad = 0.7
+        elif robot == "fetch":
             inner_rad = 0.3
             outer_rad = 0.75
         elif robot == "ur10":
