@@ -3095,8 +3095,8 @@ class MicrowaveEnv(MujocoEnv):
 
         if robot == "panda" or robot == "fetch":
             inner_rad = 0.3
-            #outer_rad = 0.8
-            outer_rad = 0.7
+            outer_rad = 0.8
+            # outer_rad = 0.7
         elif robot == "ur10":
             inner_rad = 0.3
             outer_rad = 0.75
