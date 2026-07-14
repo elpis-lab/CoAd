@@ -8,7 +8,7 @@ import pickle
 from tqdm import tqdm
 
 from coad.utils import set_seed, load_env_and_robot, get_data_folder
-from coad.task_space import build_task_nn
+from coad.task_space import build_task_nn, key_to_center, split_key, has_contact_face
 from coad.env import MujocoEnv
 from coad.robot import MujocoRobot
 from coad.mink_ik import get_ik_solver
@@ -42,7 +42,25 @@ def solve_joint_goal_set_condensed(
         raise ValueError(f"Invalid adaptation method: {adaptation}")
 
     # Build BallTree for finding nearby neighbors
-    nn, bin_poses = build_task_nn(joint_goal_set)
+
+    if has_contact_face(env):
+        nn_by_face = {}
+        keys_by_face = {}
+
+        for face in ["xy", "yz", "zx"]:
+            face_task_set = {
+                key[1:]: joint_goal_set[key]
+                for key in joint_goal_set.keys()
+                if key[0] == face
+            }
+
+            nn, _ = build_task_nn(face_task_set)
+
+            nn_by_face[face] = nn
+            keys_by_face[face] = list(face_task_set.keys())
+    else:
+        nn, _ = build_task_nn(joint_goal_set)
+
     keys = list(joint_goal_set.keys())
     coverage_success = np.zeros(len(joint_goal_set), dtype=bool)
 
@@ -58,13 +76,30 @@ def solve_joint_goal_set_condensed(
     print(f"Number of tasks: {len(joint_goal_set)}")
     print(f"Number of successfully solved tasks: {len(remaining)}")
 
+    # Skip keys with IK failures
+    valid_keys = [
+        key
+        for key, goal in joint_goal_set.items()
+        if goal is not None
+    ]
+
     # Result containers
     root_paths = {}  # root_id -> root path
+    # key_to_root = {
+    #     key: (None, None) for key in joint_goal_set.keys()
+    # }  # key -> (root_id, goal_q)
+    # build_center_time = {key: np.nan for key in joint_goal_set.keys()}
+    # compress_time = {key: np.nan for key in joint_goal_set.keys()}
+
     key_to_root = {
-        key: (None, None) for key in joint_goal_set.keys()
-    }  # key -> (root_id, goal_q)
-    build_center_time = {key: np.nan for key in joint_goal_set.keys()}
-    compress_time = {key: np.nan for key in joint_goal_set.keys()}
+        key: (None, None) for key in valid_keys
+    }
+    build_center_time = {
+        key: np.nan for key in valid_keys
+    }
+    compress_time = {
+        key: np.nan for key in valid_keys
+    }
 
     # Planner
     ompl_planner = OMPLPlanner(robot, data, planner=planner)
@@ -137,7 +172,15 @@ def solve_joint_goal_set_condensed(
 
         # Query nearest neighbors and
         # Consider those that are still in remaining
-        key_arr = np.array(center_key)
+
+        if has_contact_face(env):
+            face, numeric_key = split_key(center_key)
+            nn = nn_by_face[face]
+            key_arr = np.array(numeric_key)
+
+        else:
+            key_arr = np.array(center_key)
+        
         key_center = (key_arr[:, 0] + key_arr[:, 1]) / 2
         neighbor_indices = nn.query(
             [key_center],

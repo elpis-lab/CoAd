@@ -28,127 +28,720 @@ from coad.robot import Panda, UR10, FetchArm
 folder1 = "dataset/top_naive"
 folder2 = "dataset/top"
 
-
 class BoxGrid:
+    FACE_VALUES = ("xy", "yz", "zx")
+
     def __init__(self, keys_to_root, tol=1e-12):
-
-        keys = np.asarray(list(keys_to_root.keys()), dtype=np.float64)
         self.keys_list = list(keys_to_root.keys())
-        self.keys_arr = keys
+        self.tol = tol
 
-        if keys.ndim != 3 or keys.shape[1:] != (4, 2):
-            raise ValueError(f"Expected keys shape (N,4,2), got {keys.shape}")
+        if not self.keys_list:
+            raise ValueError("keys_to_root cannot be empty")
 
+        first_key = self.keys_list[0]
+
+        # AllStable:
+        #     (face, x, y, z, yaw)
+        #
+        # Standard:
+        #     (x, y, z, yaw)
+        #
+        # Microwave:
+        #     (x, y, z, yaw, door)
+        self.has_face = (
+            len(first_key) == 5
+            and isinstance(first_key[0], str)
+        )
+
+        if self.has_face:
+            if first_key[0] not in self.FACE_VALUES:
+                raise ValueError(
+                    f"Unknown AllStable face value: {first_key[0]}"
+                )
+
+            self.numeric_offset = 1
+            self.has_door = False
+            self.ndim = 5
+
+            numeric_keys = [
+                key[1:]
+                for key in self.keys_list
+            ]
+        else:
+            self.numeric_offset = 0
+            self.ndim = len(first_key)
+            self.has_door = self.ndim == 5
+
+            numeric_keys = self.keys_list
+
+        if self.ndim not in (4, 5):
+            raise ValueError(
+                f"Expected 4D or 5D keys, got {self.ndim} dimensions"
+            )
+
+        self.keys_arr = np.asarray(
+            numeric_keys,
+            dtype=np.float64,
+        )
+
+        keys = self.keys_arr
+
+        if keys.ndim != 3 or keys.shape[2] != 2:
+            raise ValueError(
+                f"Expected numeric key shape (N,D,2), got {keys.shape}"
+            )
+
+        # Numeric dimensions are always:
+        #     x, y, z, yaw
+        #
+        # and optionally:
+        #     door
         mins = keys[:, :, 0].copy()
         maxs = keys[:, :, 1].copy()
 
-        self.x_global_min = np.min(mins[:, 0])
-        self.x_global_max = np.max(maxs[:, 0])
-        self.y_global_min = np.min(mins[:, 1])
-        self.y_global_max = np.max(maxs[:, 1])
-
-        # Wrap yaw into [-pi, pi)
+        # Wrap yaw into [-pi, pi).
         mins[:, 3] = self._wrap_pi(mins[:, 3])
         maxs[:, 3] = self._wrap_pi(maxs[:, 3])
 
-        # ---------- X/Y: USE BIN STARTS DIRECTLY ----------
+        # ---------- FACE ----------
+        if self.has_face:
+            self.face_values = tuple(
+                face
+                for face in self.FACE_VALUES
+                if any(key[0] == face for key in self.keys_list)
+            )
+
+            self._face_to_iface = {
+                face: index
+                for index, face in enumerate(self.face_values)
+            }
+
+        # ---------- GLOBAL BOUNDS ----------
+        self.x_global_min = float(np.min(mins[:, 0]))
+        self.x_global_max = float(np.max(maxs[:, 0]))
+
+        self.y_global_min = float(np.min(mins[:, 1]))
+        self.y_global_max = float(np.max(maxs[:, 1]))
+
+        if self.has_door:
+            self.door_global_min = float(np.min(mins[:, 4]))
+            self.door_global_max = float(np.max(maxs[:, 4]))
+
+        # ---------- X/Y BIN STARTS ----------
         self.x_mins = np.sort(np.unique(mins[:, 0]))
         self.y_mins = np.sort(np.unique(mins[:, 1]))
 
-        # Build fast lookup maps for construction
-        self._x_to_ix = {float(v): i for i, v in enumerate(self.x_mins)}
-        self._y_to_iy = {float(v): i for i, v in enumerate(self.y_mins)}
+        self._x_to_ix = {
+            float(value): index
+            for index, value in enumerate(self.x_mins)
+        }
+
+        self._y_to_iy = {
+            float(value): index
+            for index, value in enumerate(self.y_mins)
+        }
 
         self.nx = len(self.x_mins)
         self.ny = len(self.y_mins)
 
-        # ---------- Z: discrete levels ----------
+        # ---------- Z DISCRETE LEVELS ----------
         self.z_values = np.sort(np.unique(mins[:, 2]))
         self.nz = len(self.z_values)
 
-        # ---------- YAW: periodic bins ----------
-        yaw_mins = np.sort(np.unique(mins[:, 3]))
-        self.nyaw = len(yaw_mins) if yaw_mins.size else 1
-        self.yaw0 = float(yaw_mins[0]) if yaw_mins.size else 0.0
+        # ---------- YAW BIN STARTS ----------
+        self.yaw_mins = np.sort(np.unique(mins[:, 3]))
+        self.nyaw = len(self.yaw_mins)
 
-        def spacing(vals, default=1.0):
-            vals = np.sort(np.unique(vals))
-            diffs = np.diff(vals)
-            diffs = diffs[diffs > tol]
-            return float(diffs.min()) if diffs.size else float(default)
+        # ---------- DOOR BIN STARTS ----------
+        if self.has_door:
+            self.door_mins = np.sort(np.unique(mins[:, 4]))
+            self.ndoor = len(self.door_mins)
 
-        self.dyaw = spacing(yaw_mins)
+            self._door_to_idoor = {
+                float(value): index
+                for index, value in enumerate(self.door_mins)
+            }
 
         # ---------- BUILD INDEX ----------
         self.index = {}
 
         for bin_idx, key in enumerate(self.keys_list):
+            if self.has_face:
+                face = key[0]
+                numeric_key = key[1:]
 
-            x_min, y_min, z_val, yaw_min = (
-                key[0][0],
-                key[1][0],
-                key[2][0],
-                key[3][0],
+                if face not in self._face_to_iface:
+                    raise ValueError(
+                        f"Unknown AllStable face value: {face}"
+                    )
+
+                iface = self._face_to_iface[face]
+            else:
+                numeric_key = key
+
+            x_min = float(numeric_key[0][0])
+            y_min = float(numeric_key[1][0])
+            z_val = float(numeric_key[2][0])
+            yaw_min = float(
+                self._wrap_pi(numeric_key[3][0])
             )
 
-            # X/Y via direct lookup
-            ix = self._x_to_ix[float(x_min)]
-            iy = self._y_to_iy[float(y_min)]
+            ix = self._x_to_ix[x_min]
+            iy = self._y_to_iy[y_min]
 
-            # Z
-            iz = int(np.argmin(np.abs(self.z_values - z_val)))
+            iz = int(np.argmin(
+                np.abs(self.z_values - z_val)
+            ))
 
-            # Yaw
-            rel = self._wrap_pi(yaw_min - self.yaw0)
-            iyaw = int(np.floor(rel / self.dyaw + tol)) % self.nyaw
+            iyaw = int(np.argmin(
+                np.abs(self.yaw_mins - yaw_min)
+            ))
 
-            indices = (ix, iy, iz, iyaw)
+            if not np.isclose(
+                self.yaw_mins[iyaw],
+                yaw_min,
+                atol=self.tol,
+                rtol=0.0,
+            ):
+                raise RuntimeError(
+                    f"Could not match yaw minimum "
+                    f"{yaw_min:.17f}"
+                )
+
+            if self.has_face:
+                indices = (
+                    iface,
+                    ix,
+                    iy,
+                    iz,
+                    iyaw,
+                )
+            elif self.has_door:
+                door_min = float(numeric_key[4][0])
+                idoor = self._door_to_idoor[door_min]
+
+                indices = (
+                    ix,
+                    iy,
+                    iz,
+                    iyaw,
+                    idoor,
+                )
+            else:
+                indices = (
+                    ix,
+                    iy,
+                    iz,
+                    iyaw,
+                )
 
             if indices in self.index:
-                raise RuntimeError(f"Duplicate bin index {indices}")
+                previous_key = self.keys_list[
+                    self.index[indices]
+                ]
+
+                raise RuntimeError(
+                    f"Duplicate bin index {indices}: "
+                    f"{previous_key} and {key}"
+                )
 
             self.index[indices] = bin_idx
 
-    def _bin_indices(self, sample, eps=1e-12):
-        x, y, z, yaw = sample
-        yaw = self._wrap_pi(yaw)
+    def _bin_indices(self, sample):
+        if len(sample) != self.ndim:
+            raise ValueError(
+                f"Expected sample with {self.ndim} values, "
+                f"got {len(sample)}: {sample}"
+            )
 
-        if x < self.x_global_min or x >= self.x_global_max:
+        if self.has_face:
+            face = sample[0]
+
+            if face not in self._face_to_iface:
+                return None
+
+            iface = self._face_to_iface[face]
+            numeric_sample = sample[1:]
+        else:
+            numeric_sample = sample
+
+        x = float(numeric_sample[0])
+        y = float(numeric_sample[1])
+        z = float(numeric_sample[2])
+        yaw = float(
+            self._wrap_pi(numeric_sample[3])
+        )
+
+        # ---------- X ----------
+        if (
+            x < self.x_global_min - self.tol
+            or x >= self.x_global_max
+        ):
             return None
 
-        if y < self.y_global_min or y >= self.y_global_max:
-            return None
-
-        ix = int(np.searchsorted(self.x_mins, x, side="right") - 1)
-        iy = int(np.searchsorted(self.y_mins, y, side="right") - 1)
+        ix = int(
+            np.searchsorted(
+                self.x_mins,
+                x,
+                side="right",
+            ) - 1
+        )
 
         if ix < 0 or ix >= self.nx:
             return None
 
+        # ---------- Y ----------
+        if (
+            y < self.y_global_min - self.tol
+            or y >= self.y_global_max
+        ):
+            return None
+
+        iy = int(
+            np.searchsorted(
+                self.y_mins,
+                y,
+                side="right",
+            ) - 1
+        )
+
         if iy < 0 or iy >= self.ny:
             return None
 
-        iz = int(np.argmin(np.abs(self.z_values - z)))
+        # ---------- Z ----------
+        iz = int(np.argmin(
+            np.abs(self.z_values - z)
+        ))
 
-        rel = self._wrap_pi(yaw - self.yaw0)
-        iyaw = int(np.floor(rel / self.dyaw + eps)) % self.nyaw
+        # ---------- YAW ----------
+        iyaw = int(
+            np.searchsorted(
+                self.yaw_mins,
+                yaw,
+                side="right",
+            ) - 1
+        )
 
-        return ix, iy, iz, iyaw
-    
+        if iyaw < 0 or iyaw >= self.nyaw:
+            return None
+
+        if self.has_face:
+            return (
+                iface,
+                ix,
+                iy,
+                iz,
+                iyaw,
+            )
+
+        # ---------- DOOR ----------
+        if self.has_door:
+            door = float(numeric_sample[4])
+
+            if (
+                door < self.door_global_min - self.tol
+                or door >= self.door_global_max
+            ):
+                return None
+
+            idoor = int(
+                np.searchsorted(
+                    self.door_mins,
+                    door,
+                    side="right",
+                ) - 1
+            )
+
+            if idoor < 0 or idoor >= self.ndoor:
+                return None
+
+            return (
+                ix,
+                iy,
+                iz,
+                iyaw,
+                idoor,
+            )
+
+        return (
+            ix,
+            iy,
+            iz,
+            iyaw,
+        )
+
     def query_point(self, sample):
         indices = self._bin_indices(sample)
+
         if indices is None:
             return None
 
-        bin_idx = self.index.get(indices, None)
+        bin_idx = self.index.get(indices)
+
         if bin_idx is None:
             return None
 
-        return self.keys_list[bin_idx]
+        key = self.keys_list[bin_idx]
+
+        if self.has_face:
+            if sample[0] != key[0]:
+                return None
+
+            numeric_sample = sample[1:]
+            numeric_key = key[1:]
+        else:
+            numeric_sample = sample
+            numeric_key = key
+
+        if not self._inside_nonperiodic(
+            numeric_sample[0],
+            numeric_key[0][0],
+            numeric_key[0][1],
+        ):
+            return None
+
+        if not self._inside_nonperiodic(
+            numeric_sample[1],
+            numeric_key[1][0],
+            numeric_key[1][1],
+        ):
+            return None
+
+        if not self._inside_yaw(
+            numeric_sample[3],
+            numeric_key[3][0],
+            numeric_key[3][1],
+        ):
+            return None
+
+        if self.has_door:
+            if not self._inside_nonperiodic(
+                numeric_sample[4],
+                numeric_key[4][0],
+                numeric_key[4][1],
+            ):
+                return None
+
+        return key
+
+    def _inside_nonperiodic(self, value, lo, hi):
+        value = float(value)
+        lo = float(lo)
+        hi = float(hi)
+
+        return (
+            value >= lo - self.tol
+            and value < hi
+        )
+
+    def _inside_yaw(self, value, lo, hi):
+        value = float(self._wrap_pi(value))
+        lo = float(self._wrap_pi(lo))
+        hi = float(self._wrap_pi(hi))
+
+        if lo <= hi:
+            return (
+                value >= lo - self.tol
+                and value < hi
+            )
+
+        return (
+            value >= lo - self.tol
+            or value < hi
+        )
 
     @staticmethod
-    def _wrap_pi(a):
-        return (a + np.pi) % (2 * np.pi) - np.pi
+    def _wrap_pi(angle):
+        return (
+            np.asarray(angle) + np.pi
+        ) % (2.0 * np.pi) - np.pi
+
+# class BoxGrid:
+#     def __init__(self, keys_to_root, tol=1e-12):
+#         self.keys_list = list(keys_to_root.keys())
+#         self.keys_arr = np.asarray(self.keys_list, dtype=np.float64)
+#         self.tol = tol
+
+#         keys = self.keys_arr
+
+#         if keys.ndim != 3 or keys.shape[2] != 2:
+#             raise ValueError(
+#                 f"Expected keys shape (N,D,2), got {keys.shape}"
+#             )
+
+#         self.ndim = keys.shape[1]
+
+#         if self.ndim not in (4, 5):
+#             raise ValueError(
+#                 f"Expected 4D or 5D keys, got {self.ndim} dimensions"
+#             )
+
+#         self.has_door = self.ndim == 5
+
+#         mins = keys[:, :, 0].copy()
+#         maxs = keys[:, :, 1].copy()
+
+#         # Wrap yaw bounds into [-pi, pi).
+#         mins[:, 3] = self._wrap_pi(mins[:, 3])
+#         maxs[:, 3] = self._wrap_pi(maxs[:, 3])
+
+#         # ---------- GLOBAL BOUNDS ----------
+#         self.x_global_min = float(np.min(mins[:, 0]))
+#         self.x_global_max = float(np.max(maxs[:, 0]))
+
+#         self.y_global_min = float(np.min(mins[:, 1]))
+#         self.y_global_max = float(np.max(maxs[:, 1]))
+
+#         if self.has_door:
+#             self.door_global_min = float(np.min(mins[:, 4]))
+#             self.door_global_max = float(np.max(maxs[:, 4]))
+
+#         # ---------- X/Y: BIN STARTS ----------
+#         self.x_mins = np.sort(np.unique(mins[:, 0]))
+#         self.y_mins = np.sort(np.unique(mins[:, 1]))
+
+#         self._x_to_ix = {
+#             float(value): index
+#             for index, value in enumerate(self.x_mins)
+#         }
+
+#         self._y_to_iy = {
+#             float(value): index
+#             for index, value in enumerate(self.y_mins)
+#         }
+
+#         self.nx = len(self.x_mins)
+#         self.ny = len(self.y_mins)
+
+#         # ---------- Z: DISCRETE LEVELS ----------
+#         self.z_values = np.sort(np.unique(mins[:, 2]))
+#         self.nz = len(self.z_values)
+
+#         # ---------- YAW: ACTUAL BIN STARTS ----------
+#         self.yaw_mins = np.sort(np.unique(mins[:, 3]))
+#         self.nyaw = len(self.yaw_mins)
+
+#         # ---------- DOOR: NON-PERIODIC BINS ----------
+#         if self.has_door:
+#             self.door_mins = np.sort(np.unique(mins[:, 4]))
+#             self.ndoor = len(self.door_mins)
+
+#             self._door_to_idoor = {
+#                 float(value): index
+#                 for index, value in enumerate(self.door_mins)
+#             }
+
+#         # ---------- BUILD INDEX ----------
+#         self.index = {}
+
+#         for bin_idx, key in enumerate(self.keys_list):
+#             x_min = float(key[0][0])
+#             y_min = float(key[1][0])
+#             z_val = float(key[2][0])
+#             yaw_min = float(self._wrap_pi(key[3][0]))
+
+#             ix = self._x_to_ix[x_min]
+#             iy = self._y_to_iy[y_min]
+
+#             iz = int(np.argmin(
+#                 np.abs(self.z_values - z_val)
+#             ))
+
+#             iyaw = int(np.argmin(
+#                 np.abs(self.yaw_mins - yaw_min)
+#             ))
+
+#             if not np.isclose(
+#                 self.yaw_mins[iyaw],
+#                 yaw_min,
+#                 atol=self.tol,
+#                 rtol=0.0,
+#             ):
+#                 raise RuntimeError(
+#                     f"Could not match yaw minimum "
+#                     f"{yaw_min:.17f}"
+#                 )
+
+#             if self.has_door:
+#                 door_min = float(key[4][0])
+#                 idoor = self._door_to_idoor[door_min]
+#                 indices = (ix, iy, iz, iyaw, idoor)
+#             else:
+#                 indices = (ix, iy, iz, iyaw)
+
+#             if indices in self.index:
+#                 previous_key = self.keys_list[
+#                     self.index[indices]
+#                 ]
+
+#                 raise RuntimeError(
+#                     f"Duplicate bin index {indices}: "
+#                     f"{previous_key} and {key}"
+#                 )
+
+#             self.index[indices] = bin_idx
+
+#     def _bin_indices(self, sample):
+#         if len(sample) != self.ndim:
+#             raise ValueError(
+#                 f"Expected sample with {self.ndim} values, "
+#                 f"got {len(sample)}: {sample}"
+#             )
+
+#         x = float(sample[0])
+#         y = float(sample[1])
+#         z = float(sample[2])
+#         yaw = float(self._wrap_pi(sample[3]))
+
+#         # ---------- X ----------
+#         if (
+#             x < self.x_global_min - self.tol
+#             or x >= self.x_global_max
+#         ):
+#             return None
+
+#         ix = int(
+#             np.searchsorted(
+#                 self.x_mins,
+#                 x,
+#                 side="right",
+#             ) - 1
+#         )
+
+#         if ix < 0 or ix >= self.nx:
+#             return None
+
+#         # ---------- Y ----------
+#         if (
+#             y < self.y_global_min - self.tol
+#             or y >= self.y_global_max
+#         ):
+#             return None
+
+#         iy = int(
+#             np.searchsorted(
+#                 self.y_mins,
+#                 y,
+#                 side="right",
+#             ) - 1
+#         )
+
+#         if iy < 0 or iy >= self.ny:
+#             return None
+
+#         # ---------- Z ----------
+#         iz = int(np.argmin(
+#             np.abs(self.z_values - z)
+#         ))
+
+#         # ---------- YAW ----------
+#         iyaw = int(
+#             np.searchsorted(
+#                 self.yaw_mins,
+#                 yaw,
+#                 side="right",
+#             ) - 1
+#         )
+
+#         # This assumes your yaw region is bounded rather than a grid
+#         # covering the entire periodic circle.
+#         if iyaw < 0 or iyaw >= self.nyaw:
+#             return None
+
+#         # ---------- DOOR ----------
+#         if self.has_door:
+#             door = float(sample[4])
+
+#             if (
+#                 door < self.door_global_min - self.tol
+#                 or door >= self.door_global_max
+#             ):
+#                 return None
+
+#             idoor = int(
+#                 np.searchsorted(
+#                     self.door_mins,
+#                     door,
+#                     side="right",
+#                 ) - 1
+#             )
+
+#             if idoor < 0 or idoor >= self.ndoor:
+#                 return None
+
+#             return ix, iy, iz, iyaw, idoor
+
+#         return ix, iy, iz, iyaw
+
+#     def query_point(self, sample):
+#         indices = self._bin_indices(sample)
+
+#         if indices is None:
+#             return None
+
+#         bin_idx = self.index.get(indices)
+
+#         if bin_idx is None:
+#             return None
+
+#         key = self.keys_list[bin_idx]
+
+#         # Verify that the selected key actually contains the sample.
+#         if not self._inside_nonperiodic(
+#             sample[0], key[0][0], key[0][1]
+#         ):
+#             return None
+
+#         if not self._inside_nonperiodic(
+#             sample[1], key[1][0], key[1][1]
+#         ):
+#             return None
+
+#         if not self._inside_yaw(
+#             sample[3], key[3][0], key[3][1]
+#         ):
+#             return None
+
+#         if self.has_door:
+#             if not self._inside_nonperiodic(
+#                 sample[4], key[4][0], key[4][1]
+#             ):
+#                 return None
+
+#         return key
+
+#     def _inside_nonperiodic(self, value, lo, hi):
+#         value = float(value)
+#         lo = float(lo)
+#         hi = float(hi)
+
+#         return (
+#             value >= lo - self.tol
+#             and value < hi
+#         )
+
+#     def _inside_yaw(self, value, lo, hi):
+#         value = float(self._wrap_pi(value))
+#         lo = float(self._wrap_pi(lo))
+#         hi = float(self._wrap_pi(hi))
+
+#         if lo <= hi:
+#             return (
+#                 value >= lo - self.tol
+#                 and value < hi
+#             )
+
+#         # Interval crosses the -pi/pi boundary.
+#         return (
+#             value >= lo - self.tol
+#             or value < hi
+#         )
+
+#     @staticmethod
+#     def _wrap_pi(angle):
+#         return (
+#             np.asarray(angle) + np.pi
+#         ) % (2.0 * np.pi) - np.pi
 
 
 def deep_tuple(x):
@@ -173,6 +766,54 @@ def get_avg_path_length(root_path, key_map):
 
         lengths[i] = traj_len(path)
     return np.mean(lengths)
+
+def sample_from_key(key):
+    """
+    Sample a configuration from either:
+
+    Standard:
+        ((x_lo, x_hi), (y_lo, y_hi), (z_lo, z_hi), (yaw_lo, yaw_hi))
+
+    Microwave:
+        ((x_lo, x_hi), (y_lo, y_hi), (z_lo, z_hi),
+         (yaw_lo, yaw_hi), (door_lo, door_hi))
+
+    AllStable:
+        (face, (x_lo, x_hi), (y_lo, y_hi),
+         (z_lo, z_hi), (yaw_lo, yaw_hi))
+    """
+    has_face = (
+        len(key) == 5
+        and isinstance(key[0], str)
+    )
+
+    if has_face:
+        face = key[0]
+        numeric_key = key[1:]
+    else:
+        face = None
+        numeric_key = key
+
+    numeric_sample = []
+
+    for lo, hi in numeric_key:
+        lo = float(lo)
+        hi = float(hi)
+
+        # Prevent sampling the upper boundary of a half-open bin.
+        upper = np.nextafter(hi, lo)
+
+        if np.isclose(lo, hi):
+            value = lo
+        else:
+            value = np.random.uniform(lo, upper)
+
+        numeric_sample.append(value)
+
+    if has_face:
+        return [face, *numeric_sample]
+
+    return numeric_sample
 
 
 class Library:
@@ -219,13 +860,16 @@ class Library:
             random_key = solved_key_list[
                 np.random.randint(0, len(solved_key_list))
             ]
-            sample = [np.random.uniform(lo, hi) for lo, hi in random_key]
+            # sample = [np.random.uniform(lo, hi) for lo, hi in random_key]
+            sample = sample_from_key(random_key)
 
             recovered_key = self.indexer.query_point(sample)
             if recovered_key is None:
                 # print("Failed to find sample", flush=True)
                 continue
             root_id, curr_goal = key_to_root[recovered_key]
+            if root_id is None:
+                continue
             root_path = root_paths[root_id]
             if root_path is None or len(root_path) == 0:
                 continue
@@ -246,56 +890,277 @@ class Library:
                 self.library[tuple(sample)] = (curr_goal, path)
                 pbar_library.update(1)
 
-        self.lib_index = self.build_library_index(w_yaw=1.0)
+        self.lib_index = self.build_library_index(w_yaw=1.0, w_door=1.0)
         # return self.lib_index
 
-    def build_library_index(self, z_tol=1e-6, w_yaw=1.0):
+    def build_library_index(
+        self,
+        z_tol=1e-6,
+        w_yaw=1.0,
+        w_door=1.0,
+    ):
         """
-        library: dict keyed by (x,y,z,yaw) -> (curr_goal, path)
-        Returns an index object you can query quickly.
-        """
-        keys = np.asarray(list(self.library.keys()), dtype=np.float64)  # (N,4)
-        if keys.ndim != 2 or keys.shape[1] != 4:
-            raise ValueError(f"Expected keys shape (N,4), got {keys.shape}")
+        Library keys may be:
 
-        # group by z (discrete)
-        z_vals = np.unique(keys[:, 2])
-        z_vals = np.sort(z_vals)
+            Standard:
+                (x, y, z, yaw)
+
+            Microwave:
+                (x, y, z, yaw, door)
+
+            AllStable:
+                (face, x, y, z, yaw)
+
+        Standard and microwave keys are grouped by discrete z.
+
+        AllStable keys are grouped by:
+            (face, discrete z)
+        """
+        raw_keys = list(self.library.keys())
+
+        if not raw_keys:
+            raise ValueError("Cannot build an index from an empty library")
+
+        first_key = raw_keys[0]
+
+        has_face = (
+            len(first_key) == 5
+            and isinstance(first_key[0], str)
+        )
+
+        if has_face:
+            # AllStable:
+            #     (face, x, y, z, yaw)
+            faces = np.asarray(
+                [key[0] for key in raw_keys],
+                dtype=object,
+            )
+
+            keys = np.asarray(
+                [key[1:] for key in raw_keys],
+                dtype=np.float64,
+            )
+
+            ndim = 5
+            has_door = False
+        else:
+            keys = np.asarray(
+                raw_keys,
+                dtype=np.float64,
+            )
+
+            if keys.ndim != 2 or keys.shape[1] not in (4, 5):
+                raise ValueError(
+                    f"Expected keys shape (N,4) or (N,5), "
+                    f"got {keys.shape}"
+                )
+
+            ndim = keys.shape[1]
+            has_door = ndim == 5
+            faces = None
+
+        # Numeric keys must always contain:
+        #     x, y, z, yaw
+        #
+        # and optionally:
+        #     door
+        if keys.ndim != 2 or keys.shape[1] not in (4, 5):
+            raise ValueError(
+                f"Expected numeric keys shape (N,4) or (N,5), "
+                f"got {keys.shape}"
+            )
+
+        z_vals = np.sort(np.unique(keys[:, 2]))
 
         trees = {}
         key_lists = {}
 
-        # scaling for yaw embedding
-        # Euclidean distance in (cos,sin) is in [0, 2]; w_yaw scales its influence.
         yaw_scale = np.sqrt(w_yaw)
+        door_scale = np.sqrt(w_door)
 
-        for z0 in z_vals:
-            mask = np.abs(keys[:, 2] - z0) <= z_tol
-            kz = keys[mask]  # (Nz,4)
-            if kz.size == 0:
-                continue
-
-            # Feature vector: [x, y, yaw_scale*cos(yaw), yaw_scale*sin(yaw)]
-            feats = np.column_stack(
-                [
-                    kz[:, 0],
-                    kz[:, 1],
-                    yaw_scale * np.cos(kz[:, 3]),
-                    yaw_scale * np.sin(kz[:, 3]),
-                ]
+        if has_face:
+            face_values = tuple(
+                face
+                for face in ("xy", "yz", "zx")
+                if np.any(faces == face)
             )
 
-            trees[float(z0)] = cKDTree(feats)
-            # store the exact tuple keys for retrieval (avoid float reconstruction issues)
-            key_lists[float(z0)] = [tuple(row) for row in kz]
+            for face in face_values:
+                face_mask = faces == face
+
+                for z0 in z_vals:
+                    mask = (
+                        face_mask
+                        & (np.abs(keys[:, 2] - z0) <= z_tol)
+                    )
+
+                    kz = keys[mask]
+
+                    if kz.size == 0:
+                        continue
+
+                    # [x, y, cos(yaw), sin(yaw)]
+                    feats = np.column_stack(
+                        [
+                            kz[:, 0],
+                            kz[:, 1],
+                            yaw_scale * np.cos(kz[:, 3]),
+                            yaw_scale * np.sin(kz[:, 3]),
+                        ]
+                    )
+
+                    group = (face, float(z0))
+
+                    trees[group] = cKDTree(feats)
+
+                    # Restore the original AllStable key format.
+                    key_lists[group] = [
+                        (
+                            face,
+                            float(row[0]),
+                            float(row[1]),
+                            float(row[2]),
+                            float(row[3]),
+                        )
+                        for row in kz
+                    ]
+
+        else:
+            face_values = None
+
+            for z0 in z_vals:
+                mask = np.abs(keys[:, 2] - z0) <= z_tol
+                kz = keys[mask]
+
+                if kz.size == 0:
+                    continue
+
+                if has_door:
+                    # [x, y, cos(yaw), sin(yaw), door]
+                    feats = np.column_stack(
+                        [
+                            kz[:, 0],
+                            kz[:, 1],
+                            yaw_scale * np.cos(kz[:, 3]),
+                            yaw_scale * np.sin(kz[:, 3]),
+                            door_scale * kz[:, 4],
+                        ]
+                    )
+                else:
+                    # [x, y, cos(yaw), sin(yaw)]
+                    feats = np.column_stack(
+                        [
+                            kz[:, 0],
+                            kz[:, 1],
+                            yaw_scale * np.cos(kz[:, 3]),
+                            yaw_scale * np.sin(kz[:, 3]),
+                        ]
+                    )
+
+                group = float(z0)
+
+                trees[group] = cKDTree(feats)
+
+                key_lists[group] = [
+                    tuple(float(value) for value in row)
+                    for row in kz
+                ]
 
         return {
+            "ndim": ndim,
+            "has_face": has_face,
+            "has_door": has_door,
+            "face_values": face_values,
             "z_vals": z_vals,
             "trees": trees,
             "key_lists": key_lists,
             "yaw_scale": yaw_scale,
+            "door_scale": door_scale,
             "z_tol": z_tol,
         }
+
+    # def build_library_index(
+    #     self,
+    #     z_tol=1e-6,
+    #     w_yaw=1.0,
+    #     w_door=1.0,
+    # ):
+    #     """
+    #     Library keys may be:
+
+    #         (x, y, z, yaw)
+    #         (x, y, z, yaw, door)
+
+    #     Returns a nearest-neighbor index grouped by discrete z.
+    #     """
+    #     keys = np.asarray(
+    #         list(self.library.keys()),
+    #         dtype=np.float64,
+    #     )
+
+    #     if keys.ndim != 2 or keys.shape[1] not in (4, 5):
+    #         raise ValueError(
+    #             f"Expected keys shape (N,4) or (N,5), got {keys.shape}"
+    #         )
+
+    #     ndim = keys.shape[1]
+    #     has_door = ndim == 5
+
+    #     # Group by discrete z.
+    #     z_vals = np.sort(np.unique(keys[:, 2]))
+
+    #     trees = {}
+    #     key_lists = {}
+
+    #     yaw_scale = np.sqrt(w_yaw)
+    #     door_scale = np.sqrt(w_door)
+
+    #     for z0 in z_vals:
+    #         mask = np.abs(keys[:, 2] - z0) <= z_tol
+    #         kz = keys[mask]
+
+    #         if kz.size == 0:
+    #             continue
+
+    #         if has_door:
+    #             # [x, y, cos(yaw), sin(yaw), door]
+    #             feats = np.column_stack(
+    #                 [
+    #                     kz[:, 0],
+    #                     kz[:, 1],
+    #                     yaw_scale * np.cos(kz[:, 3]),
+    #                     yaw_scale * np.sin(kz[:, 3]),
+    #                     door_scale * kz[:, 4],
+    #                 ]
+    #             )
+    #         else:
+    #             # [x, y, cos(yaw), sin(yaw)]
+    #             feats = np.column_stack(
+    #                 [
+    #                     kz[:, 0],
+    #                     kz[:, 1],
+    #                     yaw_scale * np.cos(kz[:, 3]),
+    #                     yaw_scale * np.sin(kz[:, 3]),
+    #                 ]
+    #             )
+
+    #         trees[float(z0)] = cKDTree(feats)
+
+    #         key_lists[float(z0)] = [
+    #             tuple(row)
+    #             for row in kz
+    #         ]
+
+    #     return {
+    #         "ndim": ndim,
+    #         "has_door": has_door,
+    #         "z_vals": z_vals,
+    #         "trees": trees,
+    #         "key_lists": key_lists,
+    #         "yaw_scale": yaw_scale,
+    #         "door_scale": door_scale,
+    #         "z_tol": z_tol,
+    #     }
 
     # def query_library_nn(self, index, sample):
     #     """
@@ -323,53 +1188,238 @@ class Library:
     #     nearest_key = index["key_lists"][z0][int(idx)]
     #     return nearest_key, self.library[nearest_key], float(dist)
 
-    def query_library_nn(self, index, sample, n=1):
+    # def query_library_nn(self, index, sample, n=1):
+    #     """
+    #     sample:
+    #         [x, y, z, yaw]
+    #         or
+    #         [x, y, z, yaw, door]
+
+    #     Returns:
+    #         [(key, (curr_goal, path), distance), ...]
+    #     """
+    #     sample = np.asarray(sample, dtype=np.float64)
+
+    #     expected_dim = index["ndim"]
+
+    #     if sample.ndim != 1 or sample.shape[0] != expected_dim:
+    #         raise ValueError(
+    #             f"Expected sample shape ({expected_dim},), "
+    #             f"got {sample.shape}"
+    #         )
+
+    #     x = float(sample[0])
+    #     y = float(sample[1])
+    #     z = float(sample[2])
+    #     yaw = float(sample[3])
+
+    #     # Pick nearest z slice.
+    #     z_vals = index["z_vals"]
+
+    #     if len(z_vals) == 0:
+    #         return []
+
+    #     zi = int(np.argmin(np.abs(z_vals - z)))
+    #     z0 = float(z_vals[zi])
+
+    #     if abs(z0 - z) > index["z_tol"]:
+    #         return []
+
+    #     tree = index["trees"].get(z0)
+
+    #     if tree is None:
+    #         return []
+
+    #     yaw_scale = index["yaw_scale"]
+
+    #     if index["has_door"]:
+    #         door = float(sample[4])
+    #         door_scale = index["door_scale"]
+
+    #         query_features = np.array(
+    #             [
+    #                 x,
+    #                 y,
+    #                 yaw_scale * np.cos(yaw),
+    #                 yaw_scale * np.sin(yaw),
+    #                 door_scale * door,
+    #             ],
+    #             dtype=np.float64,
+    #         )
+    #     else:
+    #         query_features = np.array(
+    #             [
+    #                 x,
+    #                 y,
+    #                 yaw_scale * np.cos(yaw),
+    #                 yaw_scale * np.sin(yaw),
+    #             ],
+    #             dtype=np.float64,
+    #         )
+
+    #     num_points = len(index["key_lists"][z0])
+    #     k = min(n, num_points)
+
+    #     if k <= 0:
+    #         return []
+
+    #     dists, idxs = tree.query(query_features, k=k)
+
+    #     dists = np.atleast_1d(dists)
+    #     idxs = np.atleast_1d(idxs)
+
+    #     results = []
+    #     key_list = index["key_lists"][z0]
+
+    #     for dist, idx in zip(dists, idxs):
+    #         key = key_list[int(idx)]
+    #         results.append(
+    #             (
+    #                 key,
+    #                 self.library[key],
+    #                 float(dist),
+    #             )
+    #         )
+
+    #     return results
+
+    def query_library_nn(self, lib_index, sample, n=1):
         """
-        sample: [x,y,z,yaw]
-        n: number of nearest neighbors to return
+        Query nearest library entries.
 
-        Returns:
-            results: list of tuples
-                [(key, (curr_goal, path), distance), ...]
-            sorted from closest to farthest
+        Supported sample formats:
+
+            Standard:
+                [x, y, z, yaw]
+
+            Microwave:
+                [x, y, z, yaw, door]
+
+            AllStable:
+                [face, x, y, z, yaw]
         """
-        x, y, z, yaw = map(float, sample)
+        has_face = lib_index["has_face"]
+        has_door = lib_index["has_door"]
 
-        # ---- pick nearest z-slice ----
-        z_vals = index["z_vals"]
-        zi = int(np.argmin(np.abs(z_vals - z)))
-        z0 = float(z_vals[zi])
+        if has_face:
+            if len(sample) != 5 or not isinstance(sample[0], str):
+                raise ValueError(
+                    "AllStable query expects "
+                    "[face, x, y, z, yaw], "
+                    f"got {sample}"
+                )
 
-        if abs(z0 - z) > index["z_tol"]:
+            face = sample[0]
+
+            if face not in lib_index["face_values"]:
+                return []
+
+            numeric_sample = np.asarray(
+                sample[1:],
+                dtype=np.float64,
+            )
+        else:
+            face = None
+
+            numeric_sample = np.asarray(
+                sample,
+                dtype=np.float64,
+            )
+
+        expected_numeric_dim = 5 if has_door else 4
+
+        if (
+            numeric_sample.ndim != 1
+            or numeric_sample.shape[0] != expected_numeric_dim
+        ):
+            raise ValueError(
+                f"Expected numeric sample with "
+                f"{expected_numeric_dim} values, "
+                f"got shape {numeric_sample.shape}: {sample}"
+            )
+
+        x = float(numeric_sample[0])
+        y = float(numeric_sample[1])
+        z = float(numeric_sample[2])
+        yaw = float(numeric_sample[3])
+
+        z_vals = lib_index["z_vals"]
+
+        if z_vals.size == 0:
             return []
 
-        tree = index["trees"].get(z0, None)
-        if tree is None:
-            return []
-
-        ys = index["yaw_scale"]
-        q = np.array(
-            [x, y, ys * np.cos(yaw), ys * np.sin(yaw)], dtype=np.float64
+        nearest_z = float(
+            z_vals[np.argmin(np.abs(z_vals - z))]
         )
 
-        # ---- Query k nearest ----
-        # ensure n does not exceed available points
-        num_points = len(index["key_lists"][z0])
-        k = min(n, num_points)
+        if has_face:
+            group = (face, nearest_z)
+        else:
+            group = nearest_z
 
-        dists, idxs = tree.query(q, k=k)
+        tree = lib_index["trees"].get(group)
+        key_list = lib_index["key_lists"].get(group)
 
-        # If k == 1, tree.query returns scalars, so normalize to arrays
-        if k == 1:
-            dists = np.array([dists])
-            idxs = np.array([idxs])
+        if tree is None or key_list is None:
+            return []
+
+        yaw_scale = lib_index["yaw_scale"]
+
+        if has_door:
+            door = float(numeric_sample[4])
+            door_scale = lib_index["door_scale"]
+
+            query_feature = np.array(
+                [
+                    x,
+                    y,
+                    yaw_scale * np.cos(yaw),
+                    yaw_scale * np.sin(yaw),
+                    door_scale * door,
+                ],
+                dtype=np.float64,
+            )
+        else:
+            query_feature = np.array(
+                [
+                    x,
+                    y,
+                    yaw_scale * np.cos(yaw),
+                    yaw_scale * np.sin(yaw),
+                ],
+                dtype=np.float64,
+            )
+
+        k = min(int(n), len(key_list))
+
+        if k <= 0:
+            return []
+
+        distances, indices = tree.query(
+            query_feature,
+            k=k,
+        )
+
+        distances = np.atleast_1d(distances)
+        indices = np.atleast_1d(indices)
 
         results = []
-        key_list = index["key_lists"][z0]
 
-        for dist, idx in zip(dists, idxs):
-            key = key_list[int(idx)]
-            results.append((key, self.library[key], float(dist)))
+        for dist, idx in zip(distances, indices):
+            idx = int(idx)
+
+            if idx < 0 or idx >= len(key_list):
+                continue
+
+            key = key_list[idx]
+
+            results.append(
+                (
+                    key,
+                    self.library[key],
+                    float(dist),
+                )
+            )
 
         return results
 
@@ -691,7 +1741,8 @@ def evaluate_graph(
         else:
             raise ValueError(f"Invalid adaptation method: {adaptation}")
         adapters.append(adapter)
-
+    print(f"Length of key_to_roots: {len(key_to_roots)}")
+    input()
     rrtc_success = []
     rrtc_lengths = []
     rrtc_solve_times = []
@@ -740,19 +1791,29 @@ def evaluate_graph(
         key_ind = np.random.randint(0, len(solved_keys))
         key = solved_keys[key_ind]
 
-        print(f"Key sampled: {key}")
+        # print(f"Key sampled: {key}")
 
 
-        sample = []
-        for lo, hi in key:
-            x = np.random.uniform(lo, hi)
-            x = np.nextafter(x, lo)
-            sample.append(x)
+        # sample = []
+        # for lo, hi in key:
+        #     x = np.random.uniform(lo, hi)
+        #     x = np.nextafter(x, lo)
+        #     sample.append(x)
+        
+        sample = sample_from_key(key)
 
-        print(f"Sample: {sample}")
+        # print(f"Sample: {sample}")
 
         # env.move_cube_object(sample)
-        env.move_object(sample)
+        if isinstance(env, MicrowaveEnv):
+            pos_sample = sample[0:4]
+            door_sample = sample[4]
+            env.move_object(pos_sample)
+            env.move_xml_joint("microwave_door_hinge", door_sample)
+        else:
+            env.move_object(sample)
+
+        # env.move_object(sample)
 
         recovered_key = reference_indexer.query_point(sample)
         if recovered_key is None:
@@ -760,12 +1821,22 @@ def evaluate_graph(
         # recovered_key = key
         
         _, key_goal = reference_key_to_root[recovered_key]
+        
+        # Task without a valid path
+        if key_goal is None:
+            continue
+
+        robot.set_joint_qpos(key_goal)
+        if robot.in_contact():
+            print("Bad sample. Skipping...")
+            continue
 
         if robot.viewer is not None:
-            print(f"Key: {recovered_key}")
-            robot.set_joint_qpos(key_goal)
+            # print(f"Key: {recovered_key}")
+            # print(f"key goal: {key_goal}")
+            
             robot.viewer.sync()
-            input()
+            # input()
 
         for adaptation_ind, adaptation in enumerate(adaptations):
             adapt_start = time.perf_counter()
@@ -998,7 +2069,7 @@ def main(args):
 
     env_name = args.env
     robot_name = args.robot
-    visualize = True
+    visualize = False
 
     if env_name == "table":
         env = TableEnv(robot_name, using_swept_volume=False)
@@ -1012,6 +2083,10 @@ def main(args):
         env = FreeEnv(robot_name, using_swept_volume=False)
     elif env_name == "largeobj":
         env = LargeObjectEnv(robot_name, using_swept_volume=False)
+    elif env_name == "microwave":
+        env = MicrowaveEnv(robot_name, using_swept_volume=False)
+    elif env_name == "allstable":
+        env = AllStableEnv(robot_name, using_swept_volume=False)
     else:
         raise ValueError(f"Invalid environment: {env_name}")
 
@@ -1084,7 +2159,7 @@ def parse_arguments():
     parser.add_argument(
         "--adaptation", choices=["linear", "grr", "dmp", "opt"], default="grr"
     )
-    parser.add_argument("--n_neighbors", type=int, default=1000)
+    parser.add_argument("--n_neighbors", type=int, default=100)
 
     args = parser.parse_args()
     return args

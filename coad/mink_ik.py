@@ -103,8 +103,10 @@ class IK:
         use_col: bool = False,
         iter_dt: float = 0.01,
         max_iters: int = 200,
-        pos_tol: float = 1e-3,
-        rot_tol: float = 1e-2,
+        # pos_tol: float = 1e-3,
+        # rot_tol: float = 1e-2,
+        pos_tol: float = 1e-4,
+        rot_tol: float = 1e-3,
     ):
         """Solve IK for target point [x y z qw qx qy qz]"""
         # Get a full size configuration to start with

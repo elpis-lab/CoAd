@@ -180,6 +180,7 @@ class MujocoEnv:
                 # Long object along x, narrow along y.
                 long_axis_slide = max(0.0, clearance_size_x / 2.0 - min_contact_overlap)
                 del_geom_x = long_axis_slide
+                del_geom_x /= 2.0
                 del_geom_y = half_finger_clearance - clearance_size_y / 2.0
                 del_geom_y /= 1.0
 
@@ -199,8 +200,8 @@ class MujocoEnv:
             else:
                 raise ValueError("Object does not fit the gripper in either x or y.")
 
-            print(f"xfits: {x_fits}")
-            print(f"yfits: {y_fits}")
+            # print(f"xfits: {x_fits}")
+            # print(f"yfits: {y_fits}")
 
             del_geom_x, del_geom_y = translational_half_extents(
                 del_geom_x,
@@ -413,10 +414,13 @@ class MujocoEnv:
         else:
             if contact_face == "xy":
                 new_object_size = object_size
+                face_idx = 0
             elif contact_face == "yz":
                 new_object_size = [object_size[1], object_size[2], object_size[0]]
+                face_idx = 1
             elif contact_face == "zx":
                 new_object_size = [object_size[2], object_size[0], object_size[1]]
+                face_idx = 2
             else:
                 raise ValueError(f"Unknown contact face: {contact_face}")
 
@@ -436,17 +440,29 @@ class MujocoEnv:
         base_xml = "scene.xml"
         
         # Generalize to more objects later
-        object_xml = self.object_xml(new_object_size, [1, 1, 0, 0], temp=True)
+        if isinstance(self, AllStableEnv):
+            object_xml = self.object_xml(new_object_size, [1, 1, 0, 0], temp=True, name=f"cube_object_0")
+            object_xml_dummy1 = self.object_xml(new_object_size, [1, 1, 0, 0], temp=True, name=f"cube_object_1")
+            object_xml_dummy2 = self.object_xml(new_object_size, [1, 1, 0, 0], temp=True, name=f"cube_object_2")
+            object_xmls = [object_xml, object_xml_dummy1, object_xml_dummy2]
         
+        else:
+            object_xml = self.object_xml(new_object_size, [1, 1, 0, 0], temp=True)
+            object_xmls = [object_xml]
+
         # free_xml_path = f"{robot_dir}/temp_scene.xml"
         # tempModel, tempData = self.build_model(free_xml_path, [object_xml])
         free_xml_path = (
             f"{robot_dir}/temp_scene_{os.getpid()}.xml"
         )
 
+        # tempModel, tempData = self.build_model(
+        #     free_xml_path,
+        #     [object_xml],
+        # )
         tempModel, tempData = self.build_model(
             free_xml_path,
-            [object_xml],
+            object_xmls,
         )
 
         visualizeTemp = False
@@ -481,7 +497,9 @@ class MujocoEnv:
             if self.env_details['robot'] == "fetch":
                 nominal_z += 0.5
                 nominal_x = 1.0
-
+        elif isinstance(self, AllStableEnv):
+            nominal_x = 0.5
+            coll_geoms = ['cube_object_0_geom', 'cube_object_1_geom', 'cube_object_2_geom']
         else:
             nominal_x = 0.5
             coll_geoms = ['cube_object_geom']
@@ -496,7 +514,12 @@ class MujocoEnv:
         nominal_object_pose = [nominal_x, nominal_y, nominal_z, nominal_yaw]
         # nominal_object_pose = [nominal_x, 0, self.object_details['size'][2]/2, 0]
         
-        self.move_object(nominal_object_pose, tempModel, tempData)
+        if contact_face is None:
+            self.move_object(nominal_object_pose, tempModel, tempData)
+        else:
+            self.move_object(
+                [contact_face, nominal_x, nominal_y, nominal_z, nominal_yaw],
+                tempModel, tempData)
         # self.move_xml_joint("microwave_door_hinge", np.pi/4, tempModel, tempData)
 
         if tempRobot.viewer is not None:
@@ -554,7 +577,7 @@ class MujocoEnv:
                 if reached:
                     # input()
                     if not tempRobot.in_contact():
-                        print(f"Nominal grasp pose found: {solution}")
+                        # print(f"Nominal grasp pose found: {solution}")
                         nominal_grasp = solution.tolist()
                         
                         if tempRobot.viewer is not None:
@@ -576,7 +599,7 @@ class MujocoEnv:
         yaw_vals = initial_tcr_intervals['yaw']
         door_vals = initial_tcr_intervals.get("door", None)
 
-        print(f"Inital TCR bounds: {initial_tcr_intervals}")
+        # print(f"Inital TCR bounds: {initial_tcr_intervals}")
 
         cleared = False
         while not cleared:
@@ -604,17 +627,23 @@ class MujocoEnv:
                     np.array(obj_perturbations) + np.array(nominal_object_pose)
                 ).tolist()
 
-                self.move_object(testPose, tempModel, tempData)
+                # self.move_object(testPose, tempModel, tempData)
+                if contact_face is None:
+                    self.move_object(testPose, tempModel, tempData)
+                else:
+                    self.move_object(
+                        [contact_face, testPose[0], testPose[1], testPose[2], testPose[3]],
+                        tempModel, tempData)
 
                 if "door" in sample:
                     self.move_xml_joint("microwave_door_hinge", door_val, tempModel, tempData)
 
                 if tempRobot.viewer is not None:
                     tempRobot.viewer.sync()
-                    # input("G?")
+                    input("G?")
 
                 if tempRobot.in_contact():
-                    print("Contact detected. Shrinking...")
+                    # print("Contact detected. Shrinking...")
                     reset = True
                     break
                 # print(f"In contact: {tempRobot.in_contact()}")
@@ -636,12 +665,12 @@ class MujocoEnv:
             else:
                 cleared = True
         
-        print("Found TCR Bounds:")
-        print(f"x: {x_vals}")
-        print(f"y: {y_vals}")
-        print(f"yaw: {yaw_vals}")
-        if door_vals is not None:
-            print(f"door_vals: {door_vals}")
+        # print("Found TCR Bounds:")
+        # print(f"x: {x_vals}")
+        # print(f"y: {y_vals}")
+        # print(f"yaw: {yaw_vals}")
+        # if door_vals is not None:
+        #     print(f"door_vals: {door_vals}")
 
         tcr_intervals = {
             'x': x_vals,
@@ -707,6 +736,22 @@ class MujocoEnv:
             lx, ly, lz = obj_size
             hx, hy, hz = lx / 2, ly / 2, lz / 2
 
+            base_box_mesh = trimesh.creation.box(
+                extents=[lx, ly, lz]
+            )
+            box_meshes = []
+
+            yaw_values = np.asarray(
+                tcr_intervals["yaw"],
+                dtype=float,
+            )
+
+            yaw_samples = np.linspace(
+                yaw_values.min(),
+                yaw_values.max(),
+                100,
+            )
+
             local_corners = np.array([
                 [-hx, -hy, -hz],
                 [-hx, -hy,  hz],
@@ -723,7 +768,8 @@ class MujocoEnv:
             for x, y, yaw in itertools.product(
                 tcr_intervals["x"],
                 tcr_intervals["y"],
-                tcr_intervals["yaw"],
+                # tcr_intervals["yaw"],
+                yaw_samples,
             ):
                 R = yaw_rot(yaw)
                 t = np.array([x, y, 0.0], dtype=float)
@@ -731,22 +777,34 @@ class MujocoEnv:
                 world_corners = local_corners @ R.T + t
                 all_points.append(world_corners)
 
-            all_points = np.vstack(all_points)
-
-            # print("swept volume calc")
+                # Testing
+                T = make_T(
+                    R, np.array([x, y, 0.0], dtype=float)
+                )
+                box_mesh_i = base_box_mesh.copy()
+                box_mesh_i.apply_transform(T)
+                box_meshes.append(box_mesh_i.vertices.copy())
             
-            # out_path = Path(self.robot_dir) / "assets" / "temp" / "sv_mesh.stl"
+            box_meshes = np.vstack(box_meshes)
+
+            hull = trimesh.points.PointCloud(box_meshes).convex_hull
+                
+
+            # all_points = np.vstack(all_points)
+
             mesh_file_name = f"sv_mesh_{sv_count}.stl"
             out_path = Path(self.robot_dir) / "assets" / "temp" / f"{mesh_file_name}"
-            # print(out_path)
             out_path.parent.mkdir(parents=True, exist_ok=True)
 
-            cloud = trimesh.points.PointCloud(all_points)
-            hull = cloud.convex_hull
+            # cloud = trimesh.points.PointCloud(all_points)
+            # hull = cloud.convex_hull
+            # hull.export(out_path)
+
+            # box_union.export(out_path)
             hull.export(out_path)
 
             # print("SV mesh extents:")
-            print(hull.bounds)
+            # print(hull.bounds)
 
             # XML path should be relative to the included robot XML's assetdir/base,
 
@@ -1228,12 +1286,12 @@ class MujocoEnv:
         T[:3, 3] = pos
         return T
 
-    def object_xml(self, object_dims, object_pose, fixed=False, temp=False):
+    def object_xml(self, object_dims, object_pose, fixed=False, temp=False, name=None):
         
         if self.object_details['type'] == "microwave":
             return self.microwave_object_xml(object_dims, object_pose, fixed, temp)
         elif self.object_details['type'] == "box":
-            return self.cube_object_xml(object_dims, object_pose, fixed, temp)
+            return self.cube_object_xml(object_dims, object_pose, fixed, temp, name=name)
         else:
             raise ValueError(f"Unsupported object type: {self.object_details['type']}")
 
@@ -1387,10 +1445,13 @@ class MujocoEnv:
         </body>
         """
 
-    def cube_object_xml(self, object_dims, object_pose, fixed=False, temp=False):
+    def cube_object_xml(self, object_dims, object_pose, fixed=False, temp=False, name=None):
         """Create cube object xml string"""
         rgba = [0.8, 0.2, 0.2, 1]
-        name = "cube_object"
+        
+        if name is None:
+            name = "cube_object"
+        
         object_x, object_y, object_z, object_yaw = object_pose
         half = 0.5 * float(object_yaw)
         qw = np.cos(half)
@@ -1526,35 +1587,145 @@ class MujocoEnv:
 
         mujoco.mj_forward(model, data)
 
+    # def move_cube_object(self, object_pose, model=None, data=None):
+    #     """
+    #     Move cube_object to (x, y, z, yaw) by writing into its free joint qpos.
+    #     object_pose: iterable length-4: (x, y, z, yaw) in radians
+    #     """
+    #     x, y, z, yaw = object_pose 
+
+    #     if model is None and data is None:
+    #         model = self.model
+    #         data = self.data
+
+    #     # jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "cube_object_free")
+    #     # qadr = self.model.jnt_qposadr[jid]
+    #     # vadr = self.model.jnt_dofadr[jid]
+
+    #     jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "cube_object_free")
+    #     qadr = model.jnt_qposadr[jid]
+    #     vadr = model.jnt_dofadr[jid]
+
+    #     half = 0.5 * float(yaw)
+    #     qw = np.cos(half)
+    #     qx = 0.0
+    #     qy = 0.0
+    #     qz = np.sin(half)
+
+    #     # free joint qpos layout: [x y z qw qx qy qz]
+    #     data.qpos[qadr:qadr+7] = [x, y, z, qw, qx, qy, qz]
+    #     data.qvel[vadr:vadr+6] = 0.0
+
+    #     mujoco.mj_forward(model, data)
+
     def move_cube_object(self, object_pose, model=None, data=None):
         """
-        Move cube_object to (x, y, z, yaw) by writing into its free joint qpos.
-        object_pose: iterable length-4: (x, y, z, yaw) in radians
-        """
-        x, y, z, yaw = object_pose 
+        Move the active cube object to (x, y, z, yaw).
 
-        if model is None and data is None:
+        Standard environments:
+            object_pose = (x, y, z, yaw)
+
+        AllStableEnv:
+            object_pose = (face, x, y, z, yaw)
+
+            The object corresponding to `face` is moved to the requested pose,
+            while the other two face-specific objects are moved to a dummy pose.
+        """
+        if model is None:
             model = self.model
+
+        if data is None:
             data = self.data
 
-        # jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "cube_object_free")
-        # qadr = self.model.jnt_qposadr[jid]
-        # vadr = self.model.jnt_dofadr[jid]
+        # This is a pose, unlike move_swept_volume's interval-based dummy_config.
+        dummy_pose = (1.0, 1.0, 0.0, 0.0)
 
-        jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "cube_object_free")
-        qadr = model.jnt_qposadr[jid]
-        vadr = model.jnt_dofadr[jid]
+        def move_one_object(joint_name, pose):
+            if len(pose) != 4:
+                raise ValueError(
+                    f"Expected pose (x, y, z, yaw), got {pose}"
+                )
 
-        half = 0.5 * float(yaw)
-        qw = np.cos(half)
-        qx = 0.0
-        qy = 0.0
-        qz = np.sin(half)
+            x, y, z, yaw = map(float, pose)
 
-        # free joint qpos layout: [x y z qw qx qy qz]
-        data.qpos[qadr:qadr+7] = [x, y, z, qw, qx, qy, qz]
-        data.qvel[vadr:vadr+6] = 0.0
+            jid = mujoco.mj_name2id(
+                model,
+                mujoco.mjtObj.mjOBJ_JOINT,
+                joint_name,
+            )
 
+            if jid == -1:
+                raise RuntimeError(
+                    f"Could not find free joint '{joint_name}'"
+                )
+
+            qadr = model.jnt_qposadr[jid]
+            vadr = model.jnt_dofadr[jid]
+
+            half = 0.5 * yaw
+
+            qw = np.cos(half)
+            qx = 0.0
+            qy = 0.0
+            qz = np.sin(half)
+
+            # MuJoCo free-joint qpos:
+            # [x, y, z, qw, qx, qy, qz]
+            data.qpos[qadr:qadr + 7] = [
+                x,
+                y,
+                z,
+                qw,
+                qx,
+                qy,
+                qz,
+            ]
+
+            data.qvel[vadr:vadr + 6] = 0.0
+
+        if isinstance(self, AllStableEnv):
+            if len(object_pose) != 5:
+                raise ValueError(
+                    "AllStableEnv expects object_pose in the form "
+                    "(face, x, y, z, yaw), "
+                    f"got {object_pose}"
+                )
+
+            face_in_contact = object_pose[0]
+            real_object_pose = object_pose[1:]
+
+            face_to_joint = {
+                "xy": "cube_object_0_free",
+                "yz": "cube_object_1_free",
+                "zx": "cube_object_2_free",
+            }
+
+            if face_in_contact not in face_to_joint:
+                raise ValueError(
+                    f"Unknown face value: {face_in_contact}. "
+                    f"Expected one of {tuple(face_to_joint)}"
+                )
+
+            for face, joint_name in face_to_joint.items():
+                if face == face_in_contact:
+                    move_one_object(joint_name, real_object_pose)
+                else:
+                    move_one_object(joint_name, dummy_pose)
+
+        else:
+            if len(object_pose) != 4:
+                raise ValueError(
+                    "Expected object_pose in the form "
+                    "(x, y, z, yaw), "
+                    f"got {object_pose}"
+                )
+
+            move_one_object(
+                "cube_object_free",
+                object_pose,
+            )
+
+        # Update all derived MuJoCo quantities once after moving every object.
         mujoco.mj_forward(model, data)
 
     # def get_geom_pose(self, geom_name, model=None, data=None):
@@ -2097,6 +2268,7 @@ class BoxEnv(MujocoEnv):
         robot_pos = config_yaml_data['base_offset']['position']
         robot_quat = super().quat_xyzw_to_wxyz(config_yaml_data['base_offset']['orientation'])
         outer_rad = 0.75
+        outer_rad = 0.4
         inner_rad = 0.3
 
         super().populate_env_details(scene_yaml, robot, "box", robot_pos, robot_quat, outer_rad, inner_rad)
@@ -2981,9 +3153,11 @@ class LargeObjectEnv(MujocoEnv):
 
         # Problem parameters
         object_type = "box"
-        object_size = [0.4, 0.06, 0.06]
+        # object_size = [0.6, 0.06, 0.06]
+        object_size = [0.3, 0.04, 0.04]
         yaw_variation = [-0.5*np.pi, 0.5*np.pi]
-        yaw_buffer = 1*(np.pi/180)
+        # yaw_variation = [-0.1*np.pi, 0.1*np.pi]
+        yaw_buffer = 0.5*(np.pi/180)
 
         # Prepare target object        
         object_variation = {
@@ -3016,11 +3190,12 @@ class LargeObjectEnv(MujocoEnv):
             # inner_rad = 0.3
             # outer_rad = 0.7
             inner_rad = 0.3
-            outer_rad = 0.544
+            # outer_rad = 0.44
             outer_rad = 0.7
         elif robot == "fetch":
             inner_rad = 0.3
             outer_rad = 0.75
+            # outer_rad = 0.5
         elif robot == "ur10":
             inner_rad = 0.3
             outer_rad = 0.75
@@ -3096,7 +3271,7 @@ class MicrowaveEnv(MujocoEnv):
         if robot == "panda" or robot == "fetch":
             inner_rad = 0.3
             outer_rad = 0.8
-            # outer_rad = 0.7
+            # outer_rad = 0.5763
         elif robot == "ur10":
             inner_rad = 0.3
             outer_rad = 0.75
@@ -3209,6 +3384,7 @@ class AllStableEnv(MujocoEnv):
         if robot == "panda" or robot == "fetch":
             inner_rad = 0.3
             outer_rad = 0.7
+            # outer_rad = 0.5
         elif robot == "ur10":
             inner_rad = 0.3
             outer_rad = 0.75
@@ -3232,21 +3408,30 @@ class AllStableEnv(MujocoEnv):
 
             sv2_xml = super().create_swept_volume(
                 tcr_intervals['yz'],
-                object_size,
+                [object_size[1], object_size[2], object_size[0]],
                 sv_count=1
             )
 
             sv3_xml = super().create_swept_volume(
                 tcr_intervals['zx'],
-                object_size,
+                [object_size[2], object_size[0], object_size[1]],
                 sv_count=2
             )
             xmls_to_add.extend([sv1_xml, sv2_xml, sv3_xml])
             # print(f"xmls_to_add: {xmls_to_add}")
         else:
             if self.object_details['type'] == "box":
-                xml = super().cube_object_xml(self.object_details['size'], [1, 1, 0, 0])
-                xmls_to_add.append(xml)
+                xml1 = super().cube_object_xml(
+                    [object_size[0], object_size[1], object_size[2]], [1, 1, 0, 0], name="cube_object_0"
+                )
+                xml2 = super().cube_object_xml(
+                    [object_size[1], object_size[2], object_size[0]], [1, 1, 0, 0], name="cube_object_1"
+                )
+                xml3 = super().cube_object_xml(
+                    [object_size[2], object_size[0], object_size[1]], [1, 1, 0, 0], name="cube_object_2"
+                )
+                
+                xmls_to_add.extend([xml1, xml2, xml3])
             else:
                 raise ValueError(f"Currently unsupported object type: {self.object_details['type']}")
         

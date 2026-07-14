@@ -185,16 +185,16 @@ class OMPLPlanner:
 
         self.v_start = self.planner.addMilestone(self.start_state())
 
-        print("start milestone added")
-        print("milestones:", n0, "->", self.planner.milestoneCount())
-        print("edges:", e0, "->", self.planner.edgeCount())
+        # print("start milestone added")
+        # print("milestones:", n0, "->", self.planner.milestoneCount())
+        # print("edges:", e0, "->", self.planner.edgeCount())
         print(f"Roadmap edge count after construction: {self.planner.edgeCount()}")
 
-        print("Building python graph...")
+        # print("Building python graph...")
 
         self.build_graph_from_planner_data()
 
-        print("Done building Python graph.")
+        # print("Done building Python graph.")
 
 
     def validate_path(self, path):

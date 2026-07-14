@@ -991,20 +991,27 @@ def create_TCR_set(env, batch_idx=None):
     base_zmin = variation["z"][0][0]
     base_zmax = variation["z"][0][1]
 
-    variation["z"] = [
+    # print(f"variation: {variation}")    
+    # print(f"base_zmin: {base_zmin}")
+    # print(f"base_zmax: {base_zmax}")    
+    # print(f"z_corrections: {z_corrections}")
+
+    variations_to_apply = variation.copy()
+
+    variations_to_apply["z"] = [
         [base_zmin + dz, base_zmax + dz]
         for dz in z_corrections
     ]
 
     regions = {
-        'x': variation['x'],
-        'y': variation['y'],
-        'z': variation['z'],
-        'yaw': variation['yaw'],
+        'x': variations_to_apply['x'],
+        'y': variations_to_apply['y'],
+        'z': variations_to_apply['z'],
+        'yaw': variations_to_apply['yaw'],
     }
 
     if env_name == "microwave":
-        regions['door'] = variation['door']
+        regions['door'] = variations_to_apply['door']
 
     print(f"regions: {regions}")    
     

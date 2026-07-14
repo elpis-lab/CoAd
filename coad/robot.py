@@ -35,7 +35,7 @@ class MujocoRobot:
         self.viewer = None
         if visualize:
             self.viewer = mujoco.viewer.launch_passive(
-                self.model, self.data, show_left_ui=True, show_right_ui=True
+                self.model, self.data, show_left_ui=False, show_right_ui=False
             )
             self.viewer.sync()
 
