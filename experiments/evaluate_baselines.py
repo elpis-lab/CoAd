@@ -1742,7 +1742,7 @@ def evaluate_graph(
             raise ValueError(f"Invalid adaptation method: {adaptation}")
         adapters.append(adapter)
     print(f"Length of key_to_roots: {len(key_to_roots)}")
-    input()
+    # input()
     rrtc_success = []
     rrtc_lengths = []
     rrtc_solve_times = []
@@ -1828,7 +1828,7 @@ def evaluate_graph(
 
         robot.set_joint_qpos(key_goal)
         if robot.in_contact():
-            print("Bad sample. Skipping...")
+            # print("Bad sample. Skipping...")
             continue
 
         if robot.viewer is not None:

@@ -173,6 +173,9 @@ def convert_task_to_joint_goal(
                     if key[0] == face
                 }
 
+                if len(face_task_set) == 0:
+                    continue
+
                 nn, _ = build_task_nn(face_task_set)
 
                 nn_by_face[face] = nn
