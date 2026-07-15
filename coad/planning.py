@@ -112,16 +112,21 @@ class VAMPPlanner:
             size = self.model.geom_size[geom_id].copy()
 
             if geom_type == mujoco.mjtGeom.mjGEOM_PLANE:
+                # continue
                 floor_half_height = 0.05
+                floor_clearance = 0.1 if self.robot_name == "fetch" else 0.0
 
                 # Create the finite floor cuboid in world coordinates.
                 floor_world_pos = world_pos.copy()
                 floor_normal_world = world_rot[:, 2]
 
                 # Place the cuboid beneath the original plane.
+                # floor_world_pos -= (
+                #     floor_half_height * floor_normal_world
+                # )
                 floor_world_pos -= (
-                    floor_half_height * floor_normal_world
-                )
+                    floor_half_height + floor_clearance
+                ) * floor_normal_world
 
                 base_pos, base_rot = self.world_pose_to_base(
                     floor_world_pos,
@@ -192,8 +197,8 @@ class VAMPPlanner:
         start_valid = self.vamp_robot.validate(start, self.environment)
         goal_valid = self.vamp_robot.validate(goal, self.environment)
 
-        # print(f"VAMP start valid: {start_valid}", flush=True)
-        # print(f"VAMP goal valid: {goal_valid}", flush=True)
+        print(f"VAMP start valid: {start_valid}", flush=True)
+        print(f"VAMP goal valid: {goal_valid}", flush=True)
 
         if len(start) != self.vamp_robot.dimension():
             raise ValueError(
