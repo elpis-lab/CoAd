@@ -124,16 +124,16 @@ class Panda(MujocoRobot):
         "joint6",
         "joint7",
     ]
-    HOME_POS = [0, 0, 0, -np.pi / 2, 0, np.pi / 2, -np.pi / 4]
+    HOME_POS_DEFAULT = [0, 0, 0, -np.pi / 2, 0, np.pi / 2, -np.pi / 4]
 
     # Home pose for under table
-    HOME_POS = [-1.6362, -1.7276, 2.151, -1.0680, -2.2128, 2.4997, 1.1928]
+    HOME_POS_UNDER_TABLE = [-1.6362, -1.7276, 2.151, -1.0680, -2.2128, 2.4997, 1.1928]
 
     FINGER = ["finger_joint1", "finger_joint2"]
     FINGER_OPEN = [0.04, 0.04]
     FINGER_CLOSED = [0.0, 0.0]
 
-    def __init__(self, model, data=None, visualize=False):
+    def __init__(self, model, data=None, visualize=False, home_pose="default"):
         """Initialize PandaRobot"""
         MujocoRobot.__init__(
             self,
@@ -143,10 +143,21 @@ class Panda(MujocoRobot):
             data=data,
             collision_geom_group=3,
             ee_name="attachment_site",
-            visualize=visualize,
+            visualize=visualize
         )
+
+        if home_pose == "default":
+            self.home_pos = self.HOME_POS_DEFAULT.copy()
+        elif home_pose == "new":
+            self.home_pos = self.HOME_POS_UNDER_TABLE.copy()
+        else:
+            raise ValueError(
+                f"Unknown Panda home pose: {home_pose!r}. "
+                "Expected 'default' or 'new'."
+            )
+
         # Send to home
-        self.set_joint_qpos(self.HOME_POS)
+        self.set_joint_qpos(self.home_pos)
 
         # Open the gripper
         for i, finger in enumerate(self.FINGER):
@@ -306,12 +317,13 @@ class FetchArm(MujocoRobot):
     FINGER = ["r_gripper_finger_joint", "l_gripper_finger_joint"]
     FINGER_CLOSED = [0, 0]
     FINGER_OPEN = [0.05, 0.05]
-    HOME_POS = [0, -1.5, 0, -np.pi, -np.pi / 2, 0, 0, 0]
+    
+    HOME_POS_EASY = [0, -1.5, 0, -np.pi, -np.pi / 2, 0, 0, 0]
 
     # Harder home pose
-    HOME_POS = [0.1, 1.32, 1.4, -0.2, 1.72, 0, 1.66, 0.1]
+    HOME_POS_HARD = [0.1, 1.32, 1.4, -0.2, 1.72, 0, 1.66, 0.1]
 
-    def __init__(self, model, data=None, visualize=False):
+    def __init__(self, model, data=None, visualize=False, home_pose="default"):
         """Initialize FetchRobot"""
         MujocoRobot.__init__(
             self,
@@ -323,8 +335,19 @@ class FetchArm(MujocoRobot):
             ee_name="attachment_site",
             visualize=visualize,
         )
+
+        if home_pose == "default":
+            self.home_pos = self.HOME_POS_EASY.copy()
+        elif home_pose == "new":
+            self.home_pos = self.HOME_POS_HARD.copy()
+        else:
+            raise ValueError(
+                f"Unknown Fetch home pose: {home_pose!r}. "
+                "Expected 'default' or 'new'."
+            )
+
         # Send to home
-        self.set_joint_qpos(self.HOME_POS)
+        self.set_joint_qpos(self.home_pos)
 
         # Open the gripper
         for i, finger in enumerate(self.FINGER):

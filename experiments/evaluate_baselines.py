@@ -2143,13 +2143,18 @@ def main(args):
     else:
         raise ValueError(f"Invalid environment: {env_name}")
 
+     # Configure problem home pose
+    NEW_ENVS = (LargeObjectEnv, AllStableEnv, MicrowaveEnv)
+    home_pose_flag = "new" if isinstance(env, NEW_ENVS) else "default"
+
+
     model, data = env.model, env.data
     if robot_name == "panda":
-        robot = Panda(model, data, visualize)
+        robot = Panda(model, data, visualize, home_pose=home_pose_flag)
     elif robot_name == "ur10":
         robot = UR10(model, data, visualize)
     elif robot_name == "fetch":
-        robot = FetchArm(model, data, visualize)
+        robot = FetchArm(model, data, visualize, home_pose=home_pose_flag)
     else:
         raise ValueError(f"Invalid robot: {robot_name}")
 
