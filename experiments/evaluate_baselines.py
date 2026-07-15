@@ -1684,6 +1684,7 @@ def evaluate_graph(
     task_set,
     adaptations,
     num_samples,
+    robot_name
 ):
     model, data = robot.model, robot.data
     home_qpos = robot.get_joint_qpos()
@@ -1770,7 +1771,7 @@ def evaluate_graph(
     else:
         ompl_planner = OMPLPlanner(robot, data)
 
-    vamp_planner = VAMPPlanner(robot, env, data)
+    vamp_planner = VAMPPlanner(robot, env, data, robot_name=robot_name)
 
     # ompl_planner = OMPLPlanner(robot, data)
 
@@ -2180,6 +2181,7 @@ def main(args):
         task_set,
         adaptations_found,
         num_samples,
+        robot_name
     )
 
 
