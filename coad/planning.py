@@ -12,6 +12,253 @@ import mujoco
 from coad.robot import MujocoRobot
 from scipy.spatial import cKDTree
 
+import vamp
+from scipy.spatial.transform import Rotation
+
+class VAMPPlanner:
+    def __init__(
+        self,
+        robot: MujocoRobot,
+        env,
+        data=None,
+        robot_name="panda",
+        sampler_name="halton",
+        log=False,
+    ):
+        self.robot = robot
+        self.model = robot.model
+        self.data = data if data is not None else mujoco.MjData(self.model)
+
+        if data is None:
+            self.data.qpos[:] = robot.data.qpos[:]
+
+        self.n_dof = robot.n_joints
+        self.robot_name = robot_name
+
+        (
+            self.vamp_robot,
+            self.planner_fn,
+            self.plan_settings,
+            self.simplify_settings,
+        ) = vamp.configure_robot_and_planner_with_kwargs(
+            robot_name,
+            "rrtc",
+        )
+
+        self.sampler = getattr(
+            self.vamp_robot,
+            sampler_name,
+        )()
+
+        # Robot base transforms
+        self.base_pos_world = np.asarray(
+            env.env_details["robot_pos"],
+            dtype=float,
+        )
+
+        self.base_quat_world = np.asarray(
+            env.env_details["robot_quat"],
+            dtype=float,
+        )
+        quat_wxyz = self.base_quat_world
+        quat_xyzw = np.array(
+            [
+                quat_wxyz[1],
+                quat_wxyz[2],
+                quat_wxyz[3],
+                quat_wxyz[0],
+            ],
+            dtype=float,
+        )
+        self.base_rot_world = Rotation.from_quat(quat_xyzw).as_matrix()        
+
+        self.environment = self.build_environment()
+
+        # raise NotImplementedError("VAMP not yet implemented.")
+
+    def world_pose_to_base(self, world_pos, world_rot):
+        world_pos = np.asarray(world_pos, dtype=float)
+        world_rot = np.asarray(world_rot, dtype=float).reshape(3, 3)
+
+        # R_WB maps base-frame vectors into world frame.
+        # Therefore, R_BW = R_WB.T.
+        base_rot_inv = self.base_rot_world.T
+
+        base_pos = base_rot_inv @ (
+            world_pos - self.base_pos_world
+        )
+
+        base_rot = base_rot_inv @ world_rot
+
+        return base_pos, base_rot
+
+    
+    def build_environment(self):
+        vamp_env = vamp.Environment()
+
+        mujoco.mj_forward(self.model, self.data)
+
+        for geom_id in range(self.model.ngeom):
+            if geom_id in self.robot.robot_geoms:
+                continue
+
+            geom_type = self.model.geom_type[geom_id]
+
+            world_pos = self.data.geom_xpos[geom_id].copy()
+            world_rot = (
+                self.data.geom_xmat[geom_id]
+                .reshape(3, 3)
+                .copy()
+            )
+            size = self.model.geom_size[geom_id].copy()
+
+            if geom_type == mujoco.mjtGeom.mjGEOM_PLANE:
+                floor_half_height = 0.05
+
+                # Create the finite floor cuboid in world coordinates.
+                floor_world_pos = world_pos.copy()
+                floor_normal_world = world_rot[:, 2]
+
+                # Place the cuboid beneath the original plane.
+                floor_world_pos -= (
+                    floor_half_height * floor_normal_world
+                )
+
+                base_pos, base_rot = self.world_pose_to_base(
+                    floor_world_pos,
+                    world_rot,
+                )
+
+                base_euler = Rotation.from_matrix(
+                    base_rot
+                ).as_euler("xyz")
+
+                vamp_env.add_cuboid(
+                    vamp.Cuboid(
+                        base_pos.tolist(),
+                        base_euler.tolist(),
+                        [5.0, 5.0, floor_half_height],
+                    )
+                )
+
+            elif geom_type == mujoco.mjtGeom.mjGEOM_BOX:
+                base_pos, base_rot = self.world_pose_to_base(
+                    world_pos,
+                    world_rot,
+                )
+
+                base_euler = Rotation.from_matrix(
+                    base_rot
+                ).as_euler("xyz")
+
+                vamp_env.add_cuboid(
+                    vamp.Cuboid(
+                        base_pos.tolist(),
+                        base_euler.tolist(),
+                        size[:3].tolist(),
+                    )
+                )
+            else:
+                continue
+                
+            print(
+                geom_id,
+                self.model.geom_type[geom_id],
+                self.model.geom_size[geom_id],
+                mujoco.mj_id2name(
+                    self.model,
+                    mujoco.mjtObj.mjOBJ_GEOM,
+                    geom_id,
+                ),
+            )
+
+        return vamp_env
+
+    def plan(
+        self,
+        start,
+        goal,
+        smooth_path=True,
+        num_waypoints=200,
+        benchmark=False,
+        log=False,
+    ):
+        start = np.asarray(start, dtype=float).tolist()
+        goal = np.asarray(goal, dtype=float).tolist()
+
+        start_valid = self.vamp_robot.validate(start, self.environment)
+        goal_valid = self.vamp_robot.validate(goal, self.environment)
+
+        # print(f"VAMP start valid: {start_valid}", flush=True)
+        # print(f"VAMP goal valid: {goal_valid}", flush=True)
+
+        if len(start) != self.vamp_robot.dimension():
+            raise ValueError(
+                f"Expected {self.vamp_robot.dimension()} joints, "
+                f"got {len(start)}"
+            )
+
+        if not start_valid:
+            empty = np.empty((0, self.n_dof), dtype=np.float32)
+            return empty, 0.0
+
+        if not goal_valid:
+            empty = np.empty((0, self.n_dof), dtype=np.float32)
+            return empty, 0.0
+
+        t0 = time.perf_counter()
+
+        result = self.planner_fn(
+            start,
+            goal,
+            self.environment,
+            self.plan_settings,
+            self.sampler,
+        )
+
+        # planning_time = time.perf_counter() - t0
+        planning_time = result.nanoseconds * 1e-9
+
+        if not result.solved:
+            empty = np.empty((0, self.n_dof), dtype=np.float32)
+            return empty, planning_time if benchmark else empty
+
+        if result is None or result.path is None:
+            return (empty, planning_time) if benchmark else empty
+        
+        path = result.path
+
+        if smooth_path:
+            simplified = self.vamp_robot.simplify(
+                path,
+                self.environment,
+                self.simplify_settings,
+                self.sampler,
+            )
+            path = simplified.path
+
+        if num_waypoints is not None:
+            path.interpolate_to_n_states(int(num_waypoints))
+
+        waypoints = np.asarray(
+            path.numpy(),
+            dtype=np.float32,
+        )
+
+        if waypoints.ndim != 2 or waypoints.shape[1] != self.n_dof:
+            raise RuntimeError(
+                f"Unexpected VAMP path shape: {waypoints.shape}"
+            )
+
+        total_time = time.perf_counter() - t0
+
+        if log:
+            print(f"VAMP planning time: {planning_time:.6f} s")
+            print(f"VAMP total time: {total_time:.6f} s")
+            print(f"VAMP path shape: {waypoints.shape}")
+
+        return waypoints, planning_time
+
 
 class OMPLPlanner:
     """

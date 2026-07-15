@@ -21,6 +21,8 @@ from experiments.visualize_paths import traj_len
 from coad.utils import set_seed, load_env_and_robot, get_data_folder
 from coad.planning import OMPLPlanner, euclidean_path_length
 
+from coad.planning import VAMPPlanner
+
 from coad.env import FreeEnv, CageEnv, BoxEnv, TableEnv, ShelfEnv, LargeObjectEnv, MicrowaveEnv, AllStableEnv
 from coad.robot import Panda, UR10, FetchArm
 
@@ -1747,6 +1749,10 @@ def evaluate_graph(
     rrtc_lengths = []
     rrtc_solve_times = []
 
+    vamp_success = []
+    vamp_lengths = []
+    vamp_solve_times = []
+
     # Use the first available adaptation as the reference key/goal source.
     # This avoids loading the original full base-library task_paths file.
     reference_key_to_root = key_to_roots[0]
@@ -1763,6 +1769,9 @@ def evaluate_graph(
         ompl_planner = OMPLPlanner(robot, data, rrtc_range=0.1)
     else:
         ompl_planner = OMPLPlanner(robot, data)
+
+    vamp_planner = VAMPPlanner(robot, env, data)
+
     # ompl_planner = OMPLPlanner(robot, data)
 
     # Building library baseline with N = reference adaptation key count.
@@ -1902,6 +1911,22 @@ def evaluate_graph(
         else:
             library_lengths.append(np.nan)
 
+        # VAMP-RRTConnect baseline
+        vamp_path, vamp_time = vamp_planner.plan(
+            start=home_qpos,
+            goal=key_goal,
+            smooth_path=False,
+            num_waypoints=200,
+            benchmark=True
+        )
+        if vamp_path.size == 0:
+            vamp_success.append(False)
+            vamp_lengths.append(np.nan)
+        else:
+            vamp_success.append(True)
+            vamp_lengths.append(traj_len(vamp_path))
+        vamp_solve_times.append(vamp_time)
+
         num_tested += 1
         pbar.update(1)
 
@@ -1913,11 +1938,17 @@ def evaluate_graph(
     library_times = np.array(library_times)
     library_lengths = np.array(library_lengths)
 
+    vamp_success = np.array(vamp_success)
+    vamp_times = np.array(vamp_solve_times)
+    vamp_lengths = np.array(vamp_lengths)
+
     rrtc_success_rate = np.mean(rrtc_success) * 100
     library_success_rate = np.mean(library_success) * 100
+    vamp_success_rate = np.mean(vamp_success) * 100
 
     rrtc_times_succ = rrtc_times[rrtc_success]
     library_times_succ = library_times[library_success]
+    vamp_times_succ = vamp_times[vamp_success]
 
     # ---- RRTConnect ----
     mean_rrtc_time_ms = np.nanmean(rrtc_times_succ) * 1000
@@ -1932,6 +1963,13 @@ def evaluate_graph(
 
     mean_library_length = np.nanmean(library_lengths)
     std_library_length = np.nanstd(library_lengths, ddof=1)
+
+        # ---- RRTConnect ----
+    mean_vamp_time_ms = np.nanmean(vamp_times_succ) * 1000
+    std_vamp_time_ms = np.nanstd(vamp_times_succ, ddof=1) * 1000
+
+    mean_vamp_length = np.nanmean(vamp_lengths)
+    std_vamp_length = np.nanstd(vamp_lengths, ddof=1)
 
     print("\n=== RRTConnect results ===")
     print(f"RRTConnect success rate: {rrtc_success_rate:.2f}%")
@@ -1949,6 +1987,15 @@ def evaluate_graph(
     )
     print(
         f"Mean library length: {mean_library_length:.6f} ± {std_library_length:.6f}"
+    )
+
+    print("\n=== VAMP-RRTC results ===")
+    print(f"VAMP-RRTC success rate: {vamp_success_rate:.2f}%")
+    print(
+        f"Mean VAMP-RRTC time: {mean_vamp_time_ms:.3f} ± {std_vamp_time_ms:.3f} ms"
+    )
+    print(
+        f"Mean VAMP-RRTC length: {mean_vamp_length:.6f} ± {std_vamp_length:.6f}"
     )
 
     for adaptation in adaptations:
@@ -1992,6 +2039,11 @@ def evaluate_graph(
             "success": library_success,
             "times": library_times,
             "lengths": library_lengths,
+        },
+        "vamp": {
+            "success": vamp_success,
+            "times": vamp_times,
+            "lengths": vamp_lengths,
         },
         "adaptations": {
             "success": adaptation_success,
