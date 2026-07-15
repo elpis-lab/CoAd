@@ -73,7 +73,6 @@ class VAMPPlanner:
         self.base_rot_world = Rotation.from_quat(quat_xyzw).as_matrix()        
 
         self.environment = self.build_environment()
-
         # raise NotImplementedError("VAMP not yet implemented.")
 
     def world_pose_to_base(self, world_pos, world_rot):
@@ -161,16 +160,16 @@ class VAMPPlanner:
             else:
                 continue
                 
-            print(
-                geom_id,
-                self.model.geom_type[geom_id],
-                self.model.geom_size[geom_id],
-                mujoco.mj_id2name(
-                    self.model,
-                    mujoco.mjtObj.mjOBJ_GEOM,
-                    geom_id,
-                ),
-            )
+            # print(
+            #     geom_id,
+            #     self.model.geom_type[geom_id],
+            #     self.model.geom_size[geom_id],
+            #     mujoco.mj_id2name(
+            #         self.model,
+            #         mujoco.mjtObj.mjOBJ_GEOM,
+            #         geom_id,
+            #     ),
+            # )
 
         return vamp_env
 
@@ -183,6 +182,10 @@ class VAMPPlanner:
         benchmark=False,
         log=False,
     ):
+        
+        # Setup environment for VAMP again (moved goal object)
+        self.environment = self.build_environment()
+
         start = np.asarray(start, dtype=float).tolist()
         goal = np.asarray(goal, dtype=float).tolist()
 
