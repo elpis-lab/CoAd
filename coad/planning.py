@@ -197,8 +197,8 @@ class VAMPPlanner:
         start_valid = self.vamp_robot.validate(start, self.environment)
         goal_valid = self.vamp_robot.validate(goal, self.environment)
 
-        print(f"VAMP start valid: {start_valid}", flush=True)
-        print(f"VAMP goal valid: {goal_valid}", flush=True)
+        # print(f"VAMP start valid: {start_valid}", flush=True)
+        # print(f"VAMP goal valid: {goal_valid}", flush=True)
 
         if len(start) != self.vamp_robot.dimension():
             raise ValueError(
