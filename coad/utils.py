@@ -77,7 +77,13 @@ def load_env_and_robot(
         raise ValueError(f"Invalid environment: {env_name}")
 
     # Configure problem home pose
-    NEW_ENVS = (LargeObjectEnv, AllStableEnv, MicrowaveEnv)
+    NEW_ENVS = [LargeObjectEnv, AllStableEnv, MicrowaveEnv]
+    
+    # Change fetch_table start config
+    if robot_name == "fetch":
+        NEW_ENVS.append(TableEnv)
+    
+    NEW_ENVS = tuple(NEW_ENVS)
     home_pose_flag = "new" if isinstance(env, NEW_ENVS) else "default"
 
     # Create robot instance

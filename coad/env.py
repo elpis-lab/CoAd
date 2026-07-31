@@ -17,6 +17,8 @@ from pprint import pprint
 import mujoco.viewer
 import trimesh
 from scipy.spatial.transform import Rotation
+from mink.exceptions import NoSolutionFound
+
 
 from geometry.pose import Pose, matrix_to_flat, wrap_to_pi
 
@@ -46,6 +48,7 @@ def wrap_to_pi(a):
 class MujocoEnv:
     def __init__(self, robot, custom_base=None):
         """Initialize object dimensions and common parameters"""
+        self.swept_volume_primitives = {}
         if robot == "panda":
             self.robot_dir = "assets/franka_emika_panda"
         else:
@@ -54,6 +57,7 @@ class MujocoEnv:
             if robot == "g1":
                 self.base_xml = "scene_23dof.xml"
             else:
+                # self.base_xml = "spherized_scene.xml"
                 self.base_xml = "scene.xml"
         else:
             self.base_xml = custom_base
@@ -169,7 +173,10 @@ class MujocoEnv:
                 self.object_details,
                 2.0 * half_finger_clearance,
             )
-            offsets = [0.0, np.pi]
+            if isinstance(self, TableEnv):    
+                offsets = [np.pi/2, -np.pi/2]
+            else:
+                offsets = [0.0, np.pi]
 
             Tews = make_Tew_yaw_variants(Tew, offsets)
 
@@ -557,41 +564,73 @@ class MujocoEnv:
             # print(i, dist)
 
         nominal_grasp = None
+        # for target in targets:
+        #     for attempt_no in range(n_attempts):
+        #         seed = sample_qpos(tempRobot.model, tempRobot.joint_ids)
+        #         reached, solution = ik_solver.solve(
+        #             target, 
+        #             seed, 
+        #             use_col=True,
+        #             pos_tol= 1e-4,
+        #             rot_tol= 1e-3,
+        #         )
+        #         tempRobot.set_joint_qpos(solution)
+
+        #         if tempRobot.viewer is not None:
+        #             tempRobot.viewer.sync()
+        #             print(f"Reached: {reached}, Solution: {solution}")
+        #             input("Proceed?")
+                
+        #         if reached:
+        #             # input()
+        #             if not tempRobot.in_contact():
+        #                 # print(f"Nominal grasp pose found: {solution}")
+        #                 nominal_grasp = solution.tolist()
+                        
+        #                 if tempRobot.viewer is not None:
+        #                     tempRobot.viewer.sync()
+        #                     input()
+        #                 break
+                
+        #     if nominal_grasp:
+        #         break
+
         for target in targets:
             for attempt_no in range(n_attempts):
                 seed = sample_qpos(tempRobot.model, tempRobot.joint_ids)
+
                 reached, solution = ik_solver.solve(
-                    target, 
-                    seed, 
+                    target,
+                    seed,
                     use_col=True,
-                    pos_tol= 1e-4,
-                    rot_tol= 1e-3,
+                    pos_tol=1e-4,
+                    rot_tol=1e-3,
                 )
+
+                if not reached or solution is None:
+                    print(
+                        f"PID {os.getpid()}: "
+                        f"IK failed on attempt {attempt_no + 1}/{n_attempts}",
+                        flush=True,
+                    )
+                    continue
+
                 tempRobot.set_joint_qpos(solution)
 
-                if tempRobot.viewer is not None:
-                    tempRobot.viewer.sync()
-                    print(f"Reached: {reached}, Solution: {solution}")
-                    input("Proceed?")
-                
-                if reached:
-                    # input()
-                    if not tempRobot.in_contact():
-                        # print(f"Nominal grasp pose found: {solution}")
-                        nominal_grasp = solution.tolist()
-                        
-                        if tempRobot.viewer is not None:
-                            tempRobot.viewer.sync()
-                            input()
-                        break
-                
-            if nominal_grasp:
+                if tempRobot.in_contact():
+                    continue
+
+                nominal_grasp = solution.tolist()
                 break
-        
-        if nominal_grasp:
+
+            if nominal_grasp is not None:
+                break
+
+        if nominal_grasp is not None:
             tempRobot.set_joint_qpos(nominal_grasp)
         else:
             raise ValueError("Unable to find IK solution")
+
         # Perturb object until collision
 
         x_vals = initial_tcr_intervals['x']
@@ -685,167 +724,628 @@ class MujocoEnv:
         if tempRobot.viewer is not None:
             input()
             tempRobot.close()
-
+        print(f"PID {os.getpid()}: {tcr_intervals}")
         return tcr_intervals
 
-    def create_swept_volume(self, tcr_intervals, obj_size=None, sv_count=0, fixed=False):
+    # def create_swept_volume(self, tcr_intervals, obj_size=None, sv_count=0, fixed=False):
         
+    #     if obj_size is None:
+    #         obj_size = self.object_details['size']
+
+    #     def yaw_rot(theta):
+    #         c = np.cos(theta)
+    #         s = np.sin(theta)
+    #         return np.array([
+    #             [c, -s, 0.0],
+    #             [s,  c, 0.0],
+    #             [0.0, 0.0, 1.0],
+    #         ])
+
+    #     def make_T(R, p):
+    #         T = np.eye(4)
+    #         T[:3, :3] = R
+    #         T[:3, 3] = p
+    #         return T
+
+    #     def transform_points(points, T):
+    #         points_h = np.c_[points, np.ones(len(points))]
+    #         return (T @ points_h.T).T[:, :3]
+
+    #     def box_corners(lx, ly, lz):
+    #         hx, hy, hz = lx / 2.0, ly / 2.0, lz / 2.0
+    #         return np.array([
+    #             [-hx, -hy, -hz],
+    #             [-hx, -hy,  hz],
+    #             [-hx,  hy, -hz],
+    #             [-hx,  hy,  hz],
+    #             [ hx, -hy, -hz],
+    #             [ hx, -hy,  hz],
+    #             [ hx,  hy, -hz],
+    #             [ hx,  hy,  hz],
+    #         ], dtype=float)
+
+    #     # Construct swept volume mesh
+    #     if self.object_details['type'] == "box":
+            
+    #         if self.env_details['robot'] == "fetch":
+    #             mesh_prefix = "assets/temp"
+    #         else:
+    #             mesh_prefix = "temp"
+
+    #         lx, ly, lz = obj_size
+    #         hx, hy, hz = lx / 2, ly / 2, lz / 2
+
+    #         base_box_mesh = trimesh.creation.box(
+    #             extents=[lx, ly, lz]
+    #         )
+    #         box_meshes = []
+
+    #         yaw_values = np.asarray(
+    #             tcr_intervals["yaw"],
+    #             dtype=float,
+    #         )
+
+    #         yaw_samples = np.linspace(
+    #             yaw_values.min(),
+    #             yaw_values.max(),
+    #             100,
+    #         )
+
+    #         local_corners = np.array([
+    #             [-hx, -hy, -hz],
+    #             [-hx, -hy,  hz],
+    #             [-hx,  hy, -hz],
+    #             [-hx,  hy,  hz],
+    #             [ hx, -hy, -hz],
+    #             [ hx, -hy,  hz],
+    #             [ hx,  hy, -hz],
+    #             [ hx,  hy,  hz],
+    #         ], dtype=float)
+
+    #         all_points = []
+
+    #         for x, y, yaw in itertools.product(
+    #             tcr_intervals["x"],
+    #             tcr_intervals["y"],
+    #             # tcr_intervals["yaw"],
+    #             yaw_samples,
+    #         ):
+    #             R = yaw_rot(yaw)
+    #             t = np.array([x, y, 0.0], dtype=float)
+
+    #             world_corners = local_corners @ R.T + t
+    #             all_points.append(world_corners)
+
+    #             # Testing
+    #             T = make_T(
+    #                 R, np.array([x, y, 0.0], dtype=float)
+    #             )
+    #             box_mesh_i = base_box_mesh.copy()
+    #             box_mesh_i.apply_transform(T)
+    #             box_meshes.append(box_mesh_i.vertices.copy())
+            
+    #         box_meshes = np.vstack(box_meshes)
+
+    #         hull = trimesh.points.PointCloud(box_meshes).convex_hull
+                
+
+    #         # all_points = np.vstack(all_points)
+
+    #         mesh_file_name = f"sv_mesh_{sv_count}.stl"
+    #         out_path = Path(self.robot_dir) / "assets" / "temp" / f"{mesh_file_name}"
+    #         out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    #         # cloud = trimesh.points.PointCloud(all_points)
+    #         # hull = cloud.convex_hull
+    #         # hull.export(out_path)
+
+    #         # box_union.export(out_path)
+    #         hull.export(out_path)
+
+    #         # print("SV mesh extents:")
+    #         # print(hull.bounds)
+
+    #         # XML path should be relative to the included robot XML's assetdir/base,
+
+    #         body_mesh_file = f"{mesh_prefix}/microwave_body_sv.stl"
+    #         mesh_path_for_xml = f"{mesh_prefix}/sv_mesh_{sv_count}.stl"
+    #         mesh_name = f"swept_volume_mesh_{sv_count}"
+
+    #         # Construct mesh XML
+    #         rgba = [0.8, 0.8, 0.8, 1.0]
+    #         name = f"swept_volume_{sv_count}"
+    #         geom_name = f"sv_mesh_{sv_count}"
+
+    #         joint_xml = "" if fixed else f'<joint name="{name}_free" type="free"/>'
+
+    #         return f"""
+    #         <asset>
+    #             <mesh name="{mesh_name}" file="{mesh_path_for_xml}"/>
+    #         </asset>
+
+    #         <body name="{name}" pos="0 0 0">
+    #             {joint_xml}
+
+    #             <geom name="{geom_name}"
+    #                 type="mesh"
+    #                 mesh="{mesh_name}"
+    #                 rgba="{rgba[0]} {rgba[1]} {rgba[2]} {rgba[3]}"/>
+    #         </body>
+    #         """
+
+    #     elif self.object_details['type'] == "microwave":
+            
+    #         out_dir = Path(self.robot_dir) / "assets" / "temp"
+    #         out_dir.mkdir(parents=True, exist_ok=True)
+
+    #         if self.env_details['robot'] == "fetch":
+    #             mesh_prefix = "assets/temp"
+    #         else:
+    #             mesh_prefix = "temp"
+
+    #         name = "swept_volume_0"
+    #         joint_xml = "" if fixed else f'<joint name="{name}_free" type="free"/>'
+
+    #         rgba_body = [0.8, 0.8, 0.8, 1.0]
+    #         rgba_door = [0.2, 0.2, 0.25, 1.0]
+    #         rgba_handle = [0.8, 0.2, 0.2, 1.0]
+
+    #         asset_xml = []
+    #         geom_xml = []
+
+    #         # Body swept volume
+    #         body_lx, body_ly, body_lz = map(float, self.object_details["size"])
+    #         body_corners = box_corners(body_lx, body_ly, body_lz)
+
+    #         body_points = []
+
+    #         for x, y, yaw in itertools.product(
+    #             tcr_intervals["x"],
+    #             tcr_intervals["y"],
+    #             tcr_intervals["yaw"],
+    #         ):
+    #             R = yaw_rot(yaw)
+    #             T = make_T(R, np.array([x, y, 0.0], dtype=float))
+    #             body_points.append(transform_points(body_corners, T))
+
+    #         body_points = np.vstack(body_points)
+    #         body_hull = trimesh.points.PointCloud(body_points).convex_hull
+
+    #         body_mesh_name = "microwave_body_sv_mesh"
+    #         # body_mesh_file = "temp/microwave_body_sv.stl"
+    #         body_mesh_file = f"{mesh_prefix}/microwave_body_sv.stl"
+    #         body_hull.export(out_dir / "microwave_body_sv.stl")
+
+    #         asset_xml.append(f'<mesh name="{body_mesh_name}" file="{body_mesh_file}"/>')
+
+    #         geom_xml.append(f"""
+    #             <geom name="microwave_body_sv"
+    #                 type="mesh"
+    #                 mesh="{body_mesh_name}"
+    #                 rgba="{rgba_body[0]} {rgba_body[1]} {rgba_body[2]} {rgba_body[3]}"/>
+    #         """)
+
+    #         # Door and handle swept volumes
+    #         door_lx, door_ly, door_lz = map(float, self.object_details["door_size"])
+    #         handle_lx, handle_ly, handle_lz = map(float, self.object_details["handle_size"])
+
+    #         handle_pos_door = np.array(
+    #             self.object_details["handle_pos_door"],
+    #             dtype=float,
+    #         )
+
+    #         hinge_pos_body = np.array(
+    #             self.object_details["hinge_pos_body"],
+    #             dtype=float,
+    #         )
+
+    #         door_origin_closed_body = np.array(
+    #             self.object_details["door_origin_closed_body"],
+    #             dtype=float,
+    #         )
+
+    #         base_door_mesh = trimesh.creation.box(
+    #             extents=[door_lx, door_ly, door_lz]
+    #         )
+
+    #         base_handle_mesh = trimesh.creation.box(
+    #             extents=[handle_lx, handle_ly, handle_lz]
+    #         )
+    #         base_handle_mesh.apply_translation(handle_pos_door)
+
+    #         door_meshes = []
+    #         handle_meshes = []
+
+    #         for x, y, yaw, phi in itertools.product(
+    #             tcr_intervals["x"],
+    #             tcr_intervals["y"],
+    #             tcr_intervals["yaw"],
+    #             tcr_intervals["door"],
+    #         ):
+    #             R_world_body = yaw_rot(yaw)
+    #             T_world_body = make_T(R_world_body, np.array([x, y, 0.0], dtype=float))
+
+    #             R_phi = yaw_rot(phi)
+
+    #             T_body_hinge = make_T(np.eye(3), hinge_pos_body)
+    #             T_hinge_rot = make_T(R_phi, np.zeros(3))
+    #             T_hinge_door = make_T(
+    #                 np.eye(3),
+    #                 door_origin_closed_body - hinge_pos_body,
+    #             )
+
+    #             T_body_door = T_body_hinge @ T_hinge_rot @ T_hinge_door
+    #             T_world_door = T_world_body @ T_body_door
+
+    #             door_mesh_i = base_door_mesh.copy()
+    #             door_mesh_i.apply_transform(T_world_door)
+    #             door_meshes.append(door_mesh_i)
+
+    #             handle_mesh_i = base_handle_mesh.copy()
+    #             handle_mesh_i.apply_transform(T_world_door)
+    #             handle_meshes.append(handle_mesh_i)
+
+    #         try:
+    #             door_union = trimesh.boolean.union(door_meshes, engine="manifold")
+    #             handle_union = trimesh.boolean.union(handle_meshes, engine="manifold")
+    #         except Exception as e:
+    #             raise RuntimeError(
+    #                 "Boolean union failed. Try installing manifold3d with "
+    #                 "`pip install manifold3d`, or reduce/increase sampling. "
+    #                 f"Original error: {e}"
+    #             )
+
+    #         door_mesh_name = "microwave_door_sv_mesh"
+    #         door_mesh_file = "temp/microwave_door_sv_union.stl"
+    #         door_mesh_file = f"{mesh_prefix}/microwave_door_sv_union.stl"
+    #         door_union.export(out_dir / "microwave_door_sv_union.stl")
+
+    #         handle_mesh_name = "microwave_handle_sv_mesh"
+    #         # handle_mesh_file = "temp/microwave_handle_sv_union.stl"
+    #         handle_mesh_file = f"{mesh_prefix}/microwave_handle_sv_union.stl"
+    #         handle_union.export(out_dir / "microwave_handle_sv_union.stl")
+
+    #         asset_xml.append(f'<mesh name="{door_mesh_name}" file="{door_mesh_file}"/>')
+    #         asset_xml.append(f'<mesh name="{handle_mesh_name}" file="{handle_mesh_file}"/>')
+
+    #         hx, hy, hz = self.object_details["hinge_pos_body"]
+
+    #         geom_xml.append(f"""
+    #             <body name="sv_door_hinge_frame" pos="{hx} {hy} {hz}">
+    #                 <joint name="sv_door_hinge"
+    #                     type="hinge"
+    #                     axis="0 0 -1"
+    #                     limited="false"/>
+
+    #                 <geom name="microwave_door_sv"
+    #                     type="mesh"
+    #                     mesh="{door_mesh_name}"
+    #                     rgba="{rgba_door[0]} {rgba_door[1]} {rgba_door[2]} {rgba_door[3]}"/>
+
+    #                 <geom name="microwave_handle_sv"
+    #                     type="mesh"
+    #                     mesh="{handle_mesh_name}"
+    #                     rgba="{rgba_handle[0]} {rgba_handle[1]} {rgba_handle[2]} {rgba_handle[3]}"/>
+    #             </body>
+    #         """)
+
+    #         return f"""
+    #         <asset>
+    #             {''.join(asset_xml)}
+    #         </asset>
+
+    #         <body name="{name}" pos="0 0 0">
+    #             {joint_xml}
+
+    #             {''.join(geom_xml)}
+    #         </body>
+    #         """
+
+    #     else:
+    #         raise ValueError(f"Unsupported object type for swept volume: {self.object_details['type']}")
+
+
+    def create_swept_volume(
+        self,
+        tcr_intervals,
+        obj_size=None,
+        sv_count=0,
+        fixed=False,
+    ):
+        """
+        Create a swept-volume mesh and save the cuboids used to construct it.
+
+        The dictionary has the form:
+
+            self.swept_volume_primitives[geom_name] = [
+                {
+                    "type": "cuboid",
+                    "position": np.ndarray(shape=(3,)),
+                    "orientation": np.ndarray(shape=(3, 3)),
+                    "half_extents": np.ndarray(shape=(3,)),
+                },
+                ...
+            ]
+
+        `position` and `orientation` describe the cuboid pose relative to the
+        mesh geom's local coordinate frame.
+
+        During VAMP environment construction, the current MuJoCo geom pose
+        should be composed with this local primitive pose.
+        """
+
         if obj_size is None:
-            obj_size = self.object_details['size']
+            obj_size = self.object_details["size"]
 
         def yaw_rot(theta):
             c = np.cos(theta)
             s = np.sin(theta)
-            return np.array([
-                [c, -s, 0.0],
-                [s,  c, 0.0],
-                [0.0, 0.0, 1.0],
-            ])
 
-        def make_T(R, p):
-            T = np.eye(4)
-            T[:3, :3] = R
-            T[:3, 3] = p
+            return np.array(
+                [
+                    [c, -s, 0.0],
+                    [s,  c, 0.0],
+                    [0.0, 0.0, 1.0],
+                ],
+                dtype=float,
+            )
+
+        def make_T(rotation, position):
+            T = np.eye(4, dtype=float)
+            T[:3, :3] = rotation
+            T[:3, 3] = position
             return T
 
         def transform_points(points, T):
-            points_h = np.c_[points, np.ones(len(points))]
+            points_h = np.c_[
+                points,
+                np.ones(len(points)),
+            ]
+
             return (T @ points_h.T).T[:, :3]
 
         def box_corners(lx, ly, lz):
-            hx, hy, hz = lx / 2.0, ly / 2.0, lz / 2.0
-            return np.array([
-                [-hx, -hy, -hz],
-                [-hx, -hy,  hz],
-                [-hx,  hy, -hz],
-                [-hx,  hy,  hz],
-                [ hx, -hy, -hz],
-                [ hx, -hy,  hz],
-                [ hx,  hy, -hz],
-                [ hx,  hy,  hz],
-            ], dtype=float)
+            hx = lx / 2.0
+            hy = ly / 2.0
+            hz = lz / 2.0
 
-        # Construct swept volume mesh
-        if self.object_details['type'] == "box":
-            
-            if self.env_details['robot'] == "fetch":
+            return np.array(
+                [
+                    [-hx, -hy, -hz],
+                    [-hx, -hy,  hz],
+                    [-hx,  hy, -hz],
+                    [-hx,  hy,  hz],
+                    [ hx, -hy, -hz],
+                    [ hx, -hy,  hz],
+                    [ hx,  hy, -hz],
+                    [ hx,  hy,  hz],
+                ],
+                dtype=float,
+            )
+
+        def make_cuboid_primitive(
+            position,
+            orientation,
+            half_extents,
+        ):
+            """
+            Save a cuboid pose in the mesh geom's local frame.
+            """
+
+            return {
+                "type": "cuboid",
+                "position": np.asarray(
+                    position,
+                    dtype=float,
+                ).copy(),
+                "orientation": np.asarray(
+                    orientation,
+                    dtype=float,
+                ).reshape(3, 3).copy(),
+                "half_extents": np.asarray(
+                    half_extents,
+                    dtype=float,
+                ).copy(),
+            }
+
+        # ================================================================
+        # Box swept volume
+        # ================================================================
+        if self.object_details["type"] == "box":
+
+            if self.env_details["robot"] == "fetch":
                 mesh_prefix = "assets/temp"
             else:
                 mesh_prefix = "temp"
 
-            lx, ly, lz = obj_size
-            hx, hy, hz = lx / 2, ly / 2, lz / 2
+            lx, ly, lz = map(float, obj_size)
+
+            half_extents = np.array(
+                [
+                    lx / 2.0,
+                    ly / 2.0,
+                    lz / 2.0,
+                ],
+                dtype=float,
+            )
 
             base_box_mesh = trimesh.creation.box(
-                extents=[lx, ly, lz]
+                extents=[lx, ly, lz],
             )
-            box_meshes = []
+
+            box_vertices = []
+            box_primitives = []
 
             yaw_values = np.asarray(
                 tcr_intervals["yaw"],
                 dtype=float,
             )
 
+            if isinstance(self, LargeObjectEnv):
+                num_yaw_samples = 100
+            else:
+                num_yaw_samples = 4
+
             yaw_samples = np.linspace(
                 yaw_values.min(),
                 yaw_values.max(),
-                100,
+                num_yaw_samples,
             )
-
-            local_corners = np.array([
-                [-hx, -hy, -hz],
-                [-hx, -hy,  hz],
-                [-hx,  hy, -hz],
-                [-hx,  hy,  hz],
-                [ hx, -hy, -hz],
-                [ hx, -hy,  hz],
-                [ hx,  hy, -hz],
-                [ hx,  hy,  hz],
-            ], dtype=float)
-
-            all_points = []
 
             for x, y, yaw in itertools.product(
                 tcr_intervals["x"],
                 tcr_intervals["y"],
-                # tcr_intervals["yaw"],
                 yaw_samples,
             ):
-                R = yaw_rot(yaw)
-                t = np.array([x, y, 0.0], dtype=float)
-
-                world_corners = local_corners @ R.T + t
-                all_points.append(world_corners)
-
-                # Testing
-                T = make_T(
-                    R, np.array([x, y, 0.0], dtype=float)
+                local_position = np.array(
+                    [
+                        float(x),
+                        float(y),
+                        0.0,
+                    ],
+                    dtype=float,
                 )
-                box_mesh_i = base_box_mesh.copy()
-                box_mesh_i.apply_transform(T)
-                box_meshes.append(box_mesh_i.vertices.copy())
-            
-            box_meshes = np.vstack(box_meshes)
 
-            hull = trimesh.points.PointCloud(box_meshes).convex_hull
-                
+                local_orientation = yaw_rot(
+                    float(yaw)
+                )
 
-            # all_points = np.vstack(all_points)
+                # Save the cuboid pose relative to the mesh geom.
+                box_primitives.append(
+                    make_cuboid_primitive(
+                        position=local_position,
+                        orientation=local_orientation,
+                        half_extents=half_extents,
+                    )
+                )
 
-            mesh_file_name = f"sv_mesh_{sv_count}.stl"
-            out_path = Path(self.robot_dir) / "assets" / "temp" / f"{mesh_file_name}"
-            out_path.parent.mkdir(parents=True, exist_ok=True)
+                # Construct the same transformed cuboid for the STL.
+                T_geom_primitive = make_T(
+                    local_orientation,
+                    local_position,
+                )
 
-            # cloud = trimesh.points.PointCloud(all_points)
-            # hull = cloud.convex_hull
-            # hull.export(out_path)
+                box_mesh = base_box_mesh.copy()
+                box_mesh.apply_transform(
+                    T_geom_primitive
+                )
 
-            # box_union.export(out_path)
+                box_vertices.append(
+                    box_mesh.vertices.copy()
+                )
+
+            if not box_vertices:
+                raise ValueError(
+                    "No cuboids were generated for the box swept volume."
+                )
+
+            box_vertices = np.vstack(
+                box_vertices
+            )
+
+            hull = trimesh.points.PointCloud(
+                box_vertices
+            ).convex_hull
+
+            mesh_file_name = (
+                f"sv_mesh_{sv_count}.stl"
+            )
+
+            out_path = (
+                Path(self.robot_dir)
+                / "assets"
+                / "temp"
+                / mesh_file_name
+            )
+
+            out_path.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+
             hull.export(out_path)
 
-            # print("SV mesh extents:")
-            # print(hull.bounds)
+            mesh_path_for_xml = (
+                f"{mesh_prefix}/{mesh_file_name}"
+            )
 
-            # XML path should be relative to the included robot XML's assetdir/base,
+            mesh_name = (
+                f"swept_volume_mesh_{sv_count}"
+            )
 
-            body_mesh_file = f"{mesh_prefix}/microwave_body_sv.stl"
-            mesh_path_for_xml = f"{mesh_prefix}/sv_mesh_{sv_count}.stl"
-            mesh_name = f"swept_volume_mesh_{sv_count}"
+            body_name = (
+                f"swept_volume_{sv_count}"
+            )
 
-            # Construct mesh XML
+            geom_name = (
+                f"sv_mesh_{sv_count}"
+            )
+
             rgba = [0.8, 0.8, 0.8, 1.0]
-            name = f"swept_volume_{sv_count}"
-            geom_name = f"sv_mesh_{sv_count}"
 
-            joint_xml = "" if fixed else f'<joint name="{name}_free" type="free"/>'
+            joint_xml = (
+                ""
+                if fixed
+                else (
+                    f'<joint name="{body_name}_free" '
+                    f'type="free"/>'
+                )
+            )
+
+            # geom name -> primitive list
+            self.swept_volume_primitives[
+                geom_name
+            ] = box_primitives
 
             return f"""
             <asset>
-                <mesh name="{mesh_name}" file="{mesh_path_for_xml}"/>
+                <mesh
+                    name="{mesh_name}"
+                    file="{mesh_path_for_xml}"/>
             </asset>
 
-            <body name="{name}" pos="0 0 0">
+            <body name="{body_name}" pos="0 0 0">
                 {joint_xml}
 
-                <geom name="{geom_name}"
+                <geom
+                    name="{geom_name}"
                     type="mesh"
                     mesh="{mesh_name}"
-                    rgba="{rgba[0]} {rgba[1]} {rgba[2]} {rgba[3]}"/>
+                    rgba="{' '.join(map(str, rgba))}"/>
             </body>
             """
 
-        elif self.object_details['type'] == "microwave":
-            
-            out_dir = Path(self.robot_dir) / "assets" / "temp"
-            out_dir.mkdir(parents=True, exist_ok=True)
+        # ================================================================
+        # Microwave swept volume
+        # ================================================================
+        elif self.object_details["type"] == "microwave":
 
-            if self.env_details['robot'] == "fetch":
+            out_dir = (
+                Path(self.robot_dir)
+                / "assets"
+                / "temp"
+            )
+
+            out_dir.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+
+            if self.env_details["robot"] == "fetch":
                 mesh_prefix = "assets/temp"
             else:
                 mesh_prefix = "temp"
 
-            name = "swept_volume_0"
-            joint_xml = "" if fixed else f'<joint name="{name}_free" type="free"/>'
+            body_name = "swept_volume_0"
+
+            joint_xml = (
+                ""
+                if fixed
+                else (
+                    f'<joint name="{body_name}_free" '
+                    f'type="free"/>'
+                )
+            )
 
             rgba_body = [0.8, 0.8, 0.8, 1.0]
             rgba_door = [0.2, 0.2, 0.25, 1.0]
@@ -854,68 +1354,204 @@ class MujocoEnv:
             asset_xml = []
             geom_xml = []
 
-            # Body swept volume
-            body_lx, body_ly, body_lz = map(float, self.object_details["size"])
-            body_corners = box_corners(body_lx, body_ly, body_lz)
+            # ------------------------------------------------------------
+            # Microwave body
+            # ------------------------------------------------------------
+            body_lx, body_ly, body_lz = map(
+                float,
+                self.object_details["size"],
+            )
+
+            body_half_extents = np.array(
+                [
+                    body_lx / 2.0,
+                    body_ly / 2.0,
+                    body_lz / 2.0,
+                ],
+                dtype=float,
+            )
+
+            body_corners = box_corners(
+                body_lx,
+                body_ly,
+                body_lz,
+            )
 
             body_points = []
+            body_primitives = []
 
             for x, y, yaw in itertools.product(
                 tcr_intervals["x"],
                 tcr_intervals["y"],
                 tcr_intervals["yaw"],
             ):
-                R = yaw_rot(yaw)
-                T = make_T(R, np.array([x, y, 0.0], dtype=float))
-                body_points.append(transform_points(body_corners, T))
+                local_position = np.array(
+                    [
+                        float(x),
+                        float(y),
+                        0.0,
+                    ],
+                    dtype=float,
+                )
 
-            body_points = np.vstack(body_points)
-            body_hull = trimesh.points.PointCloud(body_points).convex_hull
+                local_orientation = yaw_rot(
+                    float(yaw)
+                )
 
-            body_mesh_name = "microwave_body_sv_mesh"
-            # body_mesh_file = "temp/microwave_body_sv.stl"
-            body_mesh_file = f"{mesh_prefix}/microwave_body_sv.stl"
-            body_hull.export(out_dir / "microwave_body_sv.stl")
+                T_geom_primitive = make_T(
+                    local_orientation,
+                    local_position,
+                )
 
-            asset_xml.append(f'<mesh name="{body_mesh_name}" file="{body_mesh_file}"/>')
+                body_points.append(
+                    transform_points(
+                        body_corners,
+                        T_geom_primitive,
+                    )
+                )
 
-            geom_xml.append(f"""
-                <geom name="microwave_body_sv"
+                body_primitives.append(
+                    make_cuboid_primitive(
+                        position=local_position,
+                        orientation=local_orientation,
+                        half_extents=body_half_extents,
+                    )
+                )
+
+            if not body_points:
+                raise ValueError(
+                    "No cuboids were generated for the "
+                    "microwave body swept volume."
+                )
+
+            body_points = np.vstack(
+                body_points
+            )
+
+            body_hull = trimesh.points.PointCloud(
+                body_points
+            ).convex_hull
+
+            body_mesh_name = (
+                "microwave_body_sv_mesh"
+            )
+
+            body_mesh_filename = (
+                "microwave_body_sv.stl"
+            )
+
+            body_mesh_file = (
+                f"{mesh_prefix}/{body_mesh_filename}"
+            )
+
+            body_hull.export(
+                out_dir / body_mesh_filename
+            )
+
+            asset_xml.append(
+                f"""
+                <mesh
+                    name="{body_mesh_name}"
+                    file="{body_mesh_file}"/>
+                """
+            )
+
+            body_geom_name = (
+                "microwave_body_sv"
+            )
+
+            geom_xml.append(
+                f"""
+                <geom
+                    name="{body_geom_name}"
                     type="mesh"
                     mesh="{body_mesh_name}"
-                    rgba="{rgba_body[0]} {rgba_body[1]} {rgba_body[2]} {rgba_body[3]}"/>
-            """)
+                    rgba="{' '.join(map(str, rgba_body))}"/>
+                """
+            )
 
-            # Door and handle swept volumes
-            door_lx, door_ly, door_lz = map(float, self.object_details["door_size"])
-            handle_lx, handle_ly, handle_lz = map(float, self.object_details["handle_size"])
+            self.swept_volume_primitives[
+                body_geom_name
+            ] = body_primitives
 
-            handle_pos_door = np.array(
-                self.object_details["handle_pos_door"],
+            # ------------------------------------------------------------
+            # Microwave door and handle
+            # ------------------------------------------------------------
+            door_lx, door_ly, door_lz = map(
+                float,
+                self.object_details["door_size"],
+            )
+
+            handle_lx, handle_ly, handle_lz = map(
+                float,
+                self.object_details["handle_size"],
+            )
+
+            door_half_extents = np.array(
+                [
+                    door_lx / 2.0,
+                    door_ly / 2.0,
+                    door_lz / 2.0,
+                ],
                 dtype=float,
             )
 
-            hinge_pos_body = np.array(
-                self.object_details["hinge_pos_body"],
+            handle_half_extents = np.array(
+                [
+                    handle_lx / 2.0,
+                    handle_ly / 2.0,
+                    handle_lz / 2.0,
+                ],
                 dtype=float,
             )
 
-            door_origin_closed_body = np.array(
-                self.object_details["door_origin_closed_body"],
+            handle_pos_door = np.asarray(
+                self.object_details[
+                    "handle_pos_door"
+                ],
+                dtype=float,
+            )
+
+            hinge_pos_body = np.asarray(
+                self.object_details[
+                    "hinge_pos_body"
+                ],
+                dtype=float,
+            )
+
+            door_origin_closed_body = np.asarray(
+                self.object_details[
+                    "door_origin_closed_body"
+                ],
                 dtype=float,
             )
 
             base_door_mesh = trimesh.creation.box(
-                extents=[door_lx, door_ly, door_lz]
+                extents=[
+                    door_lx,
+                    door_ly,
+                    door_lz,
+                ],
             )
 
             base_handle_mesh = trimesh.creation.box(
-                extents=[handle_lx, handle_ly, handle_lz]
+                extents=[
+                    handle_lx,
+                    handle_ly,
+                    handle_lz,
+                ],
             )
-            base_handle_mesh.apply_translation(handle_pos_door)
+
+            # Handle geometry is offset from the door origin.
+            base_handle_mesh.apply_translation(
+                handle_pos_door
+            )
 
             door_meshes = []
             handle_meshes = []
+
+            door_primitives = []
+            handle_primitives = []
 
             for x, y, yaw, phi in itertools.product(
                 tcr_intervals["x"],
@@ -923,79 +1559,228 @@ class MujocoEnv:
                 tcr_intervals["yaw"],
                 tcr_intervals["door"],
             ):
-                R_world_body = yaw_rot(yaw)
-                T_world_body = make_T(R_world_body, np.array([x, y, 0.0], dtype=float))
-
-                R_phi = yaw_rot(phi)
-
-                T_body_hinge = make_T(np.eye(3), hinge_pos_body)
-                T_hinge_rot = make_T(R_phi, np.zeros(3))
-                T_hinge_door = make_T(
-                    np.eye(3),
-                    door_origin_closed_body - hinge_pos_body,
+                R_geom_body = yaw_rot(
+                    float(yaw)
                 )
 
-                T_body_door = T_body_hinge @ T_hinge_rot @ T_hinge_door
-                T_world_door = T_world_body @ T_body_door
+                p_geom_body = np.array(
+                    [
+                        float(x),
+                        float(y),
+                        0.0,
+                    ],
+                    dtype=float,
+                )
 
-                door_mesh_i = base_door_mesh.copy()
-                door_mesh_i.apply_transform(T_world_door)
-                door_meshes.append(door_mesh_i)
+                T_geom_body = make_T(
+                    R_geom_body,
+                    p_geom_body,
+                )
 
-                handle_mesh_i = base_handle_mesh.copy()
-                handle_mesh_i.apply_transform(T_world_door)
-                handle_meshes.append(handle_mesh_i)
+                R_phi = yaw_rot(
+                    float(phi)
+                )
+
+                T_body_hinge = make_T(
+                    np.eye(3, dtype=float),
+                    hinge_pos_body,
+                )
+
+                T_hinge_rotation = make_T(
+                    R_phi,
+                    np.zeros(3, dtype=float),
+                )
+
+                T_hinge_door = make_T(
+                    np.eye(3, dtype=float),
+                    door_origin_closed_body
+                    - hinge_pos_body,
+                )
+
+                T_body_door = (
+                    T_body_hinge
+                    @ T_hinge_rotation
+                    @ T_hinge_door
+                )
+
+                # This is the transform used to place the door cuboid
+                # in the exported door mesh's coordinate frame.
+                T_geom_door = (
+                    T_geom_body
+                    @ T_body_door
+                )
+
+                door_local_position = (
+                    T_geom_door[:3, 3].copy()
+                )
+
+                door_local_orientation = (
+                    T_geom_door[:3, :3].copy()
+                )
+
+                door_mesh = base_door_mesh.copy()
+                door_mesh.apply_transform(
+                    T_geom_door
+                )
+                door_meshes.append(door_mesh)
+
+                door_primitives.append(
+                    make_cuboid_primitive(
+                        position=door_local_position,
+                        orientation=door_local_orientation,
+                        half_extents=door_half_extents,
+                    )
+                )
+
+                # The base handle mesh already contains handle_pos_door,
+                # so applying T_geom_door matches the exported mesh.
+                handle_mesh = base_handle_mesh.copy()
+                handle_mesh.apply_transform(
+                    T_geom_door
+                )
+                handle_meshes.append(handle_mesh)
+
+                handle_local_position = (
+                    door_local_position
+                    + door_local_orientation
+                    @ handle_pos_door
+                )
+
+                handle_local_orientation = (
+                    door_local_orientation
+                )
+
+                handle_primitives.append(
+                    make_cuboid_primitive(
+                        position=handle_local_position,
+                        orientation=handle_local_orientation,
+                        half_extents=handle_half_extents,
+                    )
+                )
+
+            if not door_meshes:
+                raise ValueError(
+                    "No cuboids were generated for the "
+                    "microwave door swept volume."
+                )
 
             try:
-                door_union = trimesh.boolean.union(door_meshes, engine="manifold")
-                handle_union = trimesh.boolean.union(handle_meshes, engine="manifold")
-            except Exception as e:
-                raise RuntimeError(
-                    "Boolean union failed. Try installing manifold3d with "
-                    "`pip install manifold3d`, or reduce/increase sampling. "
-                    f"Original error: {e}"
+                door_union = trimesh.boolean.union(
+                    door_meshes,
+                    engine="manifold",
                 )
 
-            door_mesh_name = "microwave_door_sv_mesh"
-            door_mesh_file = "temp/microwave_door_sv_union.stl"
-            door_mesh_file = f"{mesh_prefix}/microwave_door_sv_union.stl"
-            door_union.export(out_dir / "microwave_door_sv_union.stl")
+                handle_union = trimesh.boolean.union(
+                    handle_meshes,
+                    engine="manifold",
+                )
 
-            handle_mesh_name = "microwave_handle_sv_mesh"
-            # handle_mesh_file = "temp/microwave_handle_sv_union.stl"
-            handle_mesh_file = f"{mesh_prefix}/microwave_handle_sv_union.stl"
-            handle_union.export(out_dir / "microwave_handle_sv_union.stl")
+            except Exception as e:
+                raise RuntimeError(
+                    "Boolean union failed. Install manifold3d with "
+                    "`pip install manifold3d`, or adjust the sampling. "
+                    f"Original error: {e}"
+                ) from e
 
-            asset_xml.append(f'<mesh name="{door_mesh_name}" file="{door_mesh_file}"/>')
-            asset_xml.append(f'<mesh name="{handle_mesh_name}" file="{handle_mesh_file}"/>')
+            door_mesh_name = (
+                "microwave_door_sv_mesh"
+            )
 
-            hx, hy, hz = self.object_details["hinge_pos_body"]
+            door_mesh_filename = (
+                "microwave_door_sv_union.stl"
+            )
 
-            geom_xml.append(f"""
-                <body name="sv_door_hinge_frame" pos="{hx} {hy} {hz}">
-                    <joint name="sv_door_hinge"
+            door_mesh_file = (
+                f"{mesh_prefix}/{door_mesh_filename}"
+            )
+
+            door_union.export(
+                out_dir / door_mesh_filename
+            )
+
+            handle_mesh_name = (
+                "microwave_handle_sv_mesh"
+            )
+
+            handle_mesh_filename = (
+                "microwave_handle_sv_union.stl"
+            )
+
+            handle_mesh_file = (
+                f"{mesh_prefix}/{handle_mesh_filename}"
+            )
+
+            handle_union.export(
+                out_dir / handle_mesh_filename
+            )
+
+            asset_xml.append(
+                f"""
+                <mesh
+                    name="{door_mesh_name}"
+                    file="{door_mesh_file}"/>
+                """
+            )
+
+            asset_xml.append(
+                f"""
+                <mesh
+                    name="{handle_mesh_name}"
+                    file="{handle_mesh_file}"/>
+                """
+            )
+
+            door_geom_name = (
+                "microwave_door_sv"
+            )
+
+            handle_geom_name = (
+                "microwave_handle_sv"
+            )
+
+            hx, hy, hz = hinge_pos_body
+
+            geom_xml.append(
+                f"""
+                <body
+                    name="sv_door_hinge_frame"
+                    pos="{hx} {hy} {hz}">
+
+                    <joint
+                        name="sv_door_hinge"
                         type="hinge"
                         axis="0 0 -1"
                         limited="false"/>
 
-                    <geom name="microwave_door_sv"
+                    <geom
+                        name="{door_geom_name}"
                         type="mesh"
                         mesh="{door_mesh_name}"
-                        rgba="{rgba_door[0]} {rgba_door[1]} {rgba_door[2]} {rgba_door[3]}"/>
+                        rgba="{' '.join(map(str, rgba_door))}"/>
 
-                    <geom name="microwave_handle_sv"
+                    <geom
+                        name="{handle_geom_name}"
                         type="mesh"
                         mesh="{handle_mesh_name}"
-                        rgba="{rgba_handle[0]} {rgba_handle[1]} {rgba_handle[2]} {rgba_handle[3]}"/>
+                        rgba="{' '.join(map(str, rgba_handle))}"/>
                 </body>
-            """)
+                """
+            )
+
+            self.swept_volume_primitives[
+                door_geom_name
+            ] = door_primitives
+
+            self.swept_volume_primitives[
+                handle_geom_name
+            ] = handle_primitives
 
             return f"""
             <asset>
                 {''.join(asset_xml)}
             </asset>
 
-            <body name="{name}" pos="0 0 0">
+            <body name="{body_name}" pos="0 0 0">
                 {joint_xml}
 
                 {''.join(geom_xml)}
@@ -1003,7 +1788,10 @@ class MujocoEnv:
             """
 
         else:
-            raise ValueError(f"Unsupported object type for swept volume: {self.object_details['type']}")
+            raise ValueError(
+                "Unsupported object type for swept-volume generation: "
+                f"{self.object_details['type']}"
+            )
 
     def build_xml(self, scene_yaml, parent_body_name="env_name", skip_ids=None, rgba=None):
         """Return xml for environment"""
@@ -2268,7 +3056,7 @@ class BoxEnv(MujocoEnv):
         robot_pos = config_yaml_data['base_offset']['position']
         robot_quat = super().quat_xyzw_to_wxyz(config_yaml_data['base_offset']['orientation'])
         outer_rad = 0.75
-        outer_rad = 0.4
+        # outer_rad = 0.4
         inner_rad = 0.3
 
         super().populate_env_details(scene_yaml, robot, "box", robot_pos, robot_quat, outer_rad, inner_rad)

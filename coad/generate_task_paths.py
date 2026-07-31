@@ -11,6 +11,7 @@ from coad.utils import set_seed, load_env_and_robot, get_data_folder
 from coad.env import MujocoEnv
 from coad.robot import MujocoRobot
 from coad.planning import OMPLPlanner, euclidean_path_length
+from coad.planning import VAMPPlanner
 
 from collections import Counter
 
@@ -198,7 +199,17 @@ def solve_individual(
     total_plan_times = np.zeros(len(joint_goal_set), dtype=float)
     path_length = np.zeros(len(joint_goal_set), dtype=float)
     task_paths = {key: None for key in joint_goal_set.keys()}
+    fallback_used = np.zeros(len(joint_goal_set), dtype=bool)
     # path_lengths = np.zeros(len(joint_goal_set), dtype=float)
+
+    # Only construct an OMPL fallback when VAMP is the primary planner.
+    fallback_planner = None
+    if isinstance(planner, VAMPPlanner):
+        fallback_planner = OMPLPlanner(
+            robot,
+            data,
+            planner="RRTConnect",
+        )
 
     # Start solving
     pbar = tqdm(enumerate(joint_goal_set), total=len(joint_goal_set))
@@ -213,15 +224,68 @@ def solve_individual(
                 robot.set_joint_qpos(ik_goal)
                 robot.viewer.sync()
 
-            path, total_time, planning_time = planner.plan(
-                start=start,
-                goal=ik_goal,
-                timeout=3.0,
-                num_waypoints=200,
-                benchmark=True,
-            )
+            used_fallback = False
+
+            if isinstance(planner, VAMPPlanner):
+                # Try VAMP first.
+                t0 = time.perf_counter()
+                path, vamp_planning_time, _ = planner.plan(
+                    start=start,
+                    goal=ik_goal,
+                    smooth_path=True,
+                    num_waypoints=200,
+                    benchmark=True,
+                )
+                vamp_total_time = time.perf_counter() - t0
+
+                planning_time = vamp_planning_time
+                total_time = vamp_total_time
+
+                # If VAMP fails, fall back to OMPL RRTConnect.
+                if path is None or len(path) == 0:
+                    used_fallback = True
+
+                    (
+                        fallback_path,
+                        fallback_total_time,
+                        fallback_planning_time,
+                    ) = fallback_planner.plan(
+                        start=start,
+                        goal=ik_goal,
+                        timeout=3.0,
+                        num_waypoints=200,
+                        benchmark=True,
+                    )
+
+                    path = fallback_path
+
+                    # Report the complete effort required to obtain the path:
+                    # failed VAMP attempt + fallback RRTConnect attempt.
+                    planning_time = (
+                        vamp_planning_time + fallback_planning_time
+                    )
+                    total_time = (
+                        vamp_total_time + fallback_total_time
+                    )
+
+                fallback_used[i] = used_fallback
+
+            else:
+                path, total_time, planning_time = planner.plan(
+                    start=start,
+                    goal=ik_goal,
+                    timeout=3.0,
+                    num_waypoints=200,
+                    benchmark=True,
+                )
+            
             if path is None or len(path) == 0:
                 print(f"Planning failure for key: {key}")
+                if robot.viewer is not None:
+                    robot.set_joint_qpos(ik_goal)
+                    robot.viewer.sync()
+                    input()
+
                 plan_success[i] = False
                 task_paths[key] = None
                 path_length[i] = np.nan
@@ -233,14 +297,14 @@ def solve_individual(
             total_plan_times[i] = total_time
 
         else:
-            print(f"No valid joint goal for key: {key}")
+            # print(f"No valid joint goal for key: {key}")
             plan_success[i] = False
             task_paths[key] = None
             solve_times[i] = np.nan
             total_plan_times[i] = np.nan
 
         # Update tqdm message periodically
-        print_interval = 100
+        print_interval = 1000
         if (i + 1) % print_interval == 0:
             st = np.array(solve_times, dtype=float)
             tt = np.array(total_plan_times, dtype=float)
@@ -248,13 +312,26 @@ def solve_individual(
             m_solve = np.nanmean(st[np.array(plan_success)])
             m_total = np.nanmean(tt[np.array(plan_success)])
             m_length = np.nanmean(pl[np.array(plan_success)])
-            tqdm.write(
-                f"[{i+1}] "
-                f"Plan Success: {np.sum(plan_success)/(i+1):.3f} | "
-                f"Planning Solving Time: {m_solve:.4f}s | "
-                f"Total Planning Time: {m_total:.4f}s | "
-                f"Path Length: {m_length:.4f}rad "
-            )
+            
+            if isinstance(planner, VAMPPlanner):
+                fallback_rate = np.sum(fallback_used[:i+1]) / (i + 1)
+
+                tqdm.write(
+                    f"[{i+1}] "
+                    f"Plan Success: {np.sum(plan_success)/(i+1):.3f} | "
+                    f"Fallback Used: {fallback_rate:.3f} | "
+                    f"Planning Solving Time: {m_solve:.4f}s | "
+                    f"Total Planning Time: {m_total:.4f}s | "
+                    f"Path Length: {m_length:.4f}rad "
+                )
+            else:
+                tqdm.write(
+                    f"[{i+1}] "
+                    f"Plan Success: {np.sum(plan_success)/(i+1):.3f} | "
+                    f"Planning Solving Time: {m_solve:.4f}s | "
+                    f"Total Planning Time: {m_total:.4f}s | "
+                    f"Path Length: {m_length:.4f}rad "
+                )
 
     results = np.stack(
         [plan_success, solve_times, total_plan_times, path_length], axis=1
@@ -267,6 +344,7 @@ def solve_joint_goal_set(
     robot: MujocoRobot,
     joint_goal_set,
     planner,
+    robot_name="panda"
 ):
     """Solve a joint goal set for a given robot at its home qpos."""
     # Robot
@@ -274,16 +352,20 @@ def solve_joint_goal_set(
     home_qpos = robot.get_joint_qpos()
 
     # Planner
-    ompl_planner = OMPLPlanner(robot, data, planner=planner)
+    if planner == "VAMP":
+        planner_obj = VAMPPlanner(robot, env, data, robot_name)
+    else:
+        planner_obj = OMPLPlanner(robot, data, planner=planner)
+    # ompl_planner = OMPLPlanner(robot, data, planner=planner)
 
     # Solve problems
     if "PRM" in planner:
         solution_paths, results = solve_batch(
-            env, robot, home_qpos, joint_goal_set, ompl_planner, 30
+            env, robot, home_qpos, joint_goal_set, planner_obj, 30
         )
     else:
         solution_paths, results = solve_individual(
-            env, robot, home_qpos, joint_goal_set, ompl_planner
+            env, robot, home_qpos, joint_goal_set, planner_obj
         )
     return solution_paths, results
 
@@ -304,7 +386,7 @@ def main(args):
         return
 
     # Load environment and robot
-    env, robot = load_env_and_robot(args.env, args.robot, visualize=False)
+    env, robot = load_env_and_robot(args.env, args.robot, visualize=True)
 
     # Solve problems
     # Load the joint space problem set
@@ -323,7 +405,7 @@ def main(args):
 
     # Solve problems converted in joint space
     task_paths, results = solve_joint_goal_set(
-        env, robot, joint_goal_set, args.planner
+        env, robot, joint_goal_set, args.planner, args.robot
     )
     # split data and keys to two separate files
     keys = list(task_paths.keys())
@@ -359,7 +441,7 @@ def parse_arguments():
         "--ik", choices=["random", "neighbor", "grr"], default="neighbor"
     )
     parser.add_argument(
-        "--planner", choices=["RRTConnect", "PRMstar", "LazyPRMstar"], default="RRTConnect"
+        "--planner", choices=["RRTConnect", "PRMstar", "LazyPRMstar", "VAMP"], default="RRTConnect"
     )
 
     args = parser.parse_args()

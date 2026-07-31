@@ -54,6 +54,7 @@ def prepare_data(
     """
     default_method_name_map = {
         "RRT-Connect": ("rrtc", None),
+        "VAMP-RRTConnect": ("vamp", None),
         "Library Baseline": ("library", None),
         "LOAD-LI": ("adaptations", "grr"),
         "LOAD-STO": ("adaptations", "opt"),
@@ -92,7 +93,8 @@ def prepare_data(
                 top_key, adapt_key = method_name_map[m]
 
                 # -------- Extract raw arrays + success mask --------
-                if top_key in ("rrtc", "library"):
+                # if top_key in ("rrtc", "library"):
+                if top_key in ("rrtc", "vamp", "library"):
                     values_raw = np.asarray(
                         results[top_key][metric], dtype=float
                     )
@@ -176,7 +178,7 @@ def plot_path_quality_boxplot(
         (robot, env)
         for robot in robots
         for env in envs
-        if robot == "panda" or (robot == "fetch" and env == "largeobj")
+        # if robot == "panda" or (robot == "fetch" and env == "largeobj")
     ]
 
     n_methods = len(methods)
@@ -340,6 +342,7 @@ def print_experiment_stats(
 
     default_method_name_map = {
         "RRT-Connect": ("rrtc", None),
+        "VAMP-RRTConnect": ("vamp", None),
         "Library Baseline": ("library", None),
         "LOAD-LI": ("adaptations", "grr"),
         "LOAD-STO": ("adaptations", "opt"),
@@ -393,7 +396,8 @@ def print_experiment_stats(
                 # ------------------------
                 # SUCCESS RATE
                 # ------------------------
-                if top_key in ("rrtc", "library"):
+                # if top_key in ("rrtc", "library"):
+                if top_key in ("rrtc", "vamp", "library"):
                     success = np.asarray(
                         results[top_key]["success"], dtype=bool
                     )
@@ -429,8 +433,16 @@ def print_experiment_stats(
 
 
 if __name__ == "__main__":
+    # methods = [
+    #     "RRT-Connect",
+    #     "Library Baseline",
+    #     "LOAD-LI",
+    #     "LOAD-DMP",
+    #     "LOAD-STO",
+    # ]
     methods = [
         "RRT-Connect",
+        "VAMP-RRTConnect",
         "Library Baseline",
         "LOAD-LI",
         "LOAD-DMP",
@@ -440,8 +452,9 @@ if __name__ == "__main__":
     robots = ["panda", "fetch", "ur10"]
     envs = ["table", "cage", "shelf", "real"]
 
+    # robots = ["panda", "fetch"]
     robots = ["panda", "fetch"]
-    envs = ["table", "allstable", "largeobj"]
+    envs = ["table", "cage", "allstable", "largeobj"]
 
 
     # Print stats first

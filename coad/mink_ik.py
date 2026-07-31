@@ -88,6 +88,32 @@ class IK:
             self.limits.append(self.velocity_limit)
         # collision avoidance
         self.limits_col = list(self.limits)
+
+        # print("\n=== MINK MODEL GEOMS ===")
+        # print("nbody:", self.model.nbody)
+        # print("ngeom:", self.model.ngeom)
+
+        # for geom_id in range(self.model.ngeom):
+        #     geom_name = mujoco.mj_id2name(
+        #         self.model,
+        #         mujoco.mjtObj.mjOBJ_GEOM,
+        #         geom_id,
+        #     )
+
+        #     body_id = self.model.geom_bodyid[geom_id]
+        #     body_name = mujoco.mj_id2name(
+        #         self.model,
+        #         mujoco.mjtObj.mjOBJ_BODY,
+        #         body_id,
+        #     )
+
+        #     print(
+        #         f"geom_id={geom_id}, "
+        #         f"name={geom_name}, "
+        #         f"body={body_name}, "
+        #         f"type={self.model.geom_type[geom_id]}"
+        #     )
+
         if collision_pairs:
             collision = mink.CollisionAvoidanceLimit(
                 model=self.model, geom_pairs=collision_pairs
@@ -161,11 +187,13 @@ class IK:
                     dt=iter_dt,
                     solver=self.solver,
                 )
-            except Exception as e:
-                import traceback
+            # except Exception as e:
+            #     import traceback
 
-                traceback.print_exc()
-                return False, best_q
+            #     traceback.print_exc()
+            #     return False, best_q
+            except mink.exceptions.NoSolutionFound:
+                return False, None
 
             # Integrate to new configuration
             self.configuration.integrate_inplace(qdot, iter_dt)
@@ -225,6 +253,170 @@ class PandaIK(IK):
         "link6_c",
         "link7_c",
     ]
+
+    # GRIPPER = [
+    #     # VAMP spheres around the wrist/gripper region
+    #     "link7_sphere_1",
+    #     "link7_sphere_2",
+    #     "link7_sphere_3",
+    #     "link7_sphere_4",
+    #     "link7_sphere_5",
+    #     "link7_sphere_6",
+    #     "link7_sphere_7",
+    #     "link7_sphere_8",
+    #     "link7_sphere_9",
+    #     "link7_sphere_10",
+    #     "link7_sphere_11",
+    #     "link7_sphere_12",
+    #     "link7_sphere_13",
+    #     "link7_sphere_14",
+    #     "link7_sphere_15",
+    #     "link7_sphere_16",
+    #     "link7_sphere_17",
+    #     "link7_sphere_18",
+    #     "link7_sphere_19",
+    #     "link7_sphere_20",
+    #     "link7_sphere_21",
+    #     "link7_sphere_22",
+    #     "link7_sphere_23",
+    #     "link7_sphere_24",
+    #     "link7_sphere_25",
+    #     "link7_sphere_26",
+
+    #     # Original hand/finger collision geoms
+    #     "hand_c",
+    #     "left_finger_c",
+    #     "right_finger_c",
+    #     "left_pad_c1",
+    #     "left_pad_c2",
+    #     "left_pad_c3",
+    #     "left_pad_c4",
+    #     "left_pad_c5",
+    #     "right_pad_c1",
+    #     "right_pad_c2",
+    #     "right_pad_c3",
+    #     "right_pad_c4",
+    #     "right_pad_c5",
+    # ]
+
+    # ARM = [
+    #     "link0_sphere_0",
+
+    #     "link1_sphere_0",
+    #     "link1_sphere_1",
+    #     "link1_sphere_2",
+    #     "link1_sphere_3",
+
+    #     "link2_sphere_0",
+    #     "link2_sphere_1",
+    #     "link2_sphere_2",
+    #     "link2_sphere_3",
+
+    #     "link3_sphere_0",
+    #     "link3_sphere_1",
+    #     "link3_sphere_2",
+    #     "link3_sphere_3",
+
+    #     "link4_sphere_0",
+    #     "link4_sphere_1",
+    #     "link4_sphere_2",
+    #     "link4_sphere_3",
+
+    #     "link5_sphere_0",
+    #     "link5_sphere_1",
+    #     "link5_sphere_2",
+    #     "link5_sphere_3",
+    #     "link5_sphere_4",
+    #     "link5_sphere_5",
+    #     "link5_sphere_6",
+    #     "link5_sphere_7",
+    #     "link5_sphere_8",
+    #     "link5_sphere_9",
+    #     "link5_sphere_10",
+    #     "link5_sphere_11",
+
+    #     "link6_sphere_0",
+    #     "link6_sphere_1",
+    #     "link6_sphere_2",
+
+    #     # This first sphere appears to represent link7 itself.
+    #     "link7_sphere_0",
+    # ]
+
+    # ARM = [
+    #     "link0_sphere_0",
+
+    #     "link1_sphere_0",
+    #     "link1_sphere_1",
+    #     "link1_sphere_2",
+    #     "link1_sphere_3",
+
+    #     "link2_sphere_0",
+    #     "link2_sphere_1",
+    #     "link2_sphere_2",
+    #     "link2_sphere_3",
+
+    #     "link3_sphere_0",
+    #     "link3_sphere_1",
+    #     "link3_sphere_2",
+    #     "link3_sphere_3",
+
+    #     "link4_sphere_0",
+    #     "link4_sphere_1",
+    #     "link4_sphere_2",
+    #     "link4_sphere_3",
+
+    #     "link5_sphere_0",
+    #     "link5_sphere_1",
+    #     "link5_sphere_2",
+    #     "link5_sphere_3",
+    #     "link5_sphere_4",
+    #     "link5_sphere_5",
+    #     "link5_sphere_6",
+    #     "link5_sphere_7",
+    #     "link5_sphere_8",
+    #     "link5_sphere_9",
+    #     "link5_sphere_10",
+    #     "link5_sphere_11",
+
+    #     "link6_sphere_0",
+    #     "link6_sphere_1",
+    #     "link6_sphere_2",
+
+    #     # The single sphere that remains directly on panda_link7
+    #     "link7_sphere_0",
+    # ]
+
+    # GRIPPER = [
+    #     # All hand and finger spheres flattened into link7 by MuJoCo.
+    #     "link7_sphere_1",
+    #     "link7_sphere_2",
+    #     "link7_sphere_3",
+    #     "link7_sphere_4",
+    #     "link7_sphere_5",
+    #     "link7_sphere_6",
+    #     "link7_sphere_7",
+    #     "link7_sphere_8",
+    #     "link7_sphere_9",
+    #     "link7_sphere_10",
+    #     "link7_sphere_11",
+    #     "link7_sphere_12",
+    #     "link7_sphere_13",
+    #     "link7_sphere_14",
+    #     "link7_sphere_15",
+    #     "link7_sphere_16",
+    #     "link7_sphere_17",
+    #     "link7_sphere_18",
+    #     "link7_sphere_19",
+    #     "link7_sphere_20",
+    #     "link7_sphere_21",
+    #     "link7_sphere_22",
+    #     "link7_sphere_23",
+    #     "link7_sphere_24",
+    #     "link7_sphere_25",
+    #     "link7_sphere_26",
+
+    # ]
 
     def __init__(
         self,

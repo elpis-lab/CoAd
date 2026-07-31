@@ -34,6 +34,10 @@ class VAMPPlanner:
 
         self.n_dof = robot.n_joints
         self.robot_name = robot_name
+        self.vamp_robot_name = (
+            "panda_corrected" if robot_name == "panda" else robot_name
+        )
+        self.env = env
 
         (
             self.vamp_robot,
@@ -41,8 +45,13 @@ class VAMPPlanner:
             self.plan_settings,
             self.simplify_settings,
         ) = vamp.configure_robot_and_planner_with_kwargs(
-            robot_name,
+            self.vamp_robot_name,
             "rrtc",
+        )
+
+        print(
+            f"VAMP robot: {self.vamp_robot_name}, "
+            f"module: {self.vamp_robot}"
         )
 
         self.sampler = getattr(
@@ -72,7 +81,7 @@ class VAMPPlanner:
         )
         self.base_rot_world = Rotation.from_quat(quat_xyzw).as_matrix()        
 
-        self.environment = self.build_environment()
+        self.environment = self.build_environment(verbose=True)
         # raise NotImplementedError("VAMP not yet implemented.")
 
     def world_pose_to_base(self, world_pos, world_rot):
@@ -92,7 +101,7 @@ class VAMPPlanner:
         return base_pos, base_rot
 
     
-    def build_environment(self):
+    def build_environment(self, verbose=False):
         vamp_env = vamp.Environment()
 
         mujoco.mj_forward(self.model, self.data)
@@ -146,6 +155,7 @@ class VAMPPlanner:
                 )
 
             elif geom_type == mujoco.mjtGeom.mjGEOM_BOX:
+                # continue
                 base_pos, base_rot = self.world_pose_to_base(
                     world_pos,
                     world_rot,
@@ -162,9 +172,72 @@ class VAMPPlanner:
                         size[:3].tolist(),
                     )
                 )
+            elif geom_type == mujoco.mjtGeom.mjGEOM_CYLINDER:
+                base_pos, base_rot = self.world_pose_to_base(
+                    world_pos,
+                    world_rot,
+                )
+
+                base_euler = Rotation.from_matrix(
+                    base_rot
+                ).as_euler("xyz")
+
+                radius = float(size[0])
+                length = 2.0 * float(size[1])
+
+                cylinder = vamp.Cylinder(
+                    base_pos.tolist(),
+                    base_euler.tolist(),
+                    radius,
+                    length,
+                )
+
+                vamp_env.add_capsule(cylinder)
+
+            elif geom_type == mujoco.mjtGeom.mjGEOM_MESH:
+                # continue
+                geom_name = mujoco.mj_id2name(
+                    self.model,
+                    mujoco.mjtObj.mjOBJ_GEOM,
+                    geom_id,
+                )
+                # Skip robot meshes
+                if geom_name is None:
+                    continue
+
+                primitive_list = self.env.swept_volume_primitives.get(geom_name)
+
+                if primitive_list is None:
+                    continue
+
+                if verbose:
+                    print(f"Adding mesh geom: {geom_name}")
+                    print(f"Number of mesh primitives: {len(primitive_list)}")
+
+                geom_world_pos = (
+                    self.data.geom_xpos[geom_id]
+                    .copy()
+                )
+
+                geom_world_rot = (
+                    self.data.geom_xmat[geom_id]
+                    .reshape(3, 3)
+                    .copy()
+                )
+
+                for primitive in primitive_list:
+                    self._add_saved_primitive(
+                        vamp_env=vamp_env,
+                        primitive=primitive,
+                        geom_world_pos=geom_world_pos,
+                        geom_world_rot=geom_world_rot,
+                    )
+
+                continue
+
             else:
                 continue
-                
+
             # print(
             #     geom_id,
             #     self.model.geom_type[geom_id],
@@ -177,6 +250,63 @@ class VAMPPlanner:
             # )
 
         return vamp_env
+
+    def _add_saved_primitive(
+        self,
+        vamp_env,
+        primitive,
+        geom_world_pos,
+        geom_world_rot,
+    ):
+        if primitive["type"] != "cuboid":
+            raise ValueError(
+                f"Unsupported saved primitive type: "
+                f"{primitive['type']}"
+            )
+
+        primitive_local_pos = np.asarray(
+            primitive["position"],
+            dtype=float,
+        )
+
+        primitive_local_rot = np.asarray(
+            primitive["orientation"],
+            dtype=float,
+        ).reshape(3, 3)
+
+        half_extents = np.asarray(
+            primitive["half_extents"],
+            dtype=float,
+        )
+
+        # Geom-local primitive pose -> MuJoCo world pose.
+        primitive_world_pos = (
+            geom_world_pos
+            + geom_world_rot @ primitive_local_pos
+        )
+
+        primitive_world_rot = (
+            geom_world_rot
+            @ primitive_local_rot
+        )
+
+        # MuJoCo world pose -> robot base / VAMP pose.
+        base_pos, base_rot = self.world_pose_to_base(
+            primitive_world_pos,
+            primitive_world_rot,
+        )
+
+        base_euler = Rotation.from_matrix(
+            base_rot
+        ).as_euler("xyz")
+
+        vamp_env.add_cuboid(
+            vamp.Cuboid(
+                base_pos.tolist(),
+                base_euler.tolist(),
+                half_extents.tolist(),
+            )
+        )
 
     def plan(
         self,
@@ -208,11 +338,12 @@ class VAMPPlanner:
 
         if not start_valid:
             empty = np.empty((0, self.n_dof), dtype=np.float32)
-            return empty, 0.0
+            return empty, 0.0, "invalid_start"
 
         if not goal_valid:
+            # print(f"VAMP: Goal invalid")
             empty = np.empty((0, self.n_dof), dtype=np.float32)
-            return empty, 0.0
+            return empty, 0.0, "invalid_goal"
 
         t0 = time.perf_counter()
 
@@ -229,10 +360,10 @@ class VAMPPlanner:
 
         if not result.solved:
             empty = np.empty((0, self.n_dof), dtype=np.float32)
-            return empty, planning_time if benchmark else empty
+            return empty, planning_time, "no_solution"
 
         if result is None or result.path is None:
-            return (empty, planning_time) if benchmark else empty
+            return empty, planning_time, "no_solution"
         
         path = result.path
 
@@ -265,7 +396,159 @@ class VAMPPlanner:
             print(f"VAMP total time: {total_time:.6f} s")
             print(f"VAMP path shape: {waypoints.shape}")
 
-        return waypoints, planning_time
+        return waypoints, planning_time, "success"
+
+    # def plan(
+    #     self,
+    #     start,
+    #     goal,
+    #     smooth_path=True,
+    #     num_waypoints=200,
+    #     benchmark=False,
+    #     log=False,
+    #     timeout=3.0,
+    # ):
+    #     """Plan from start to goal using repeated VAMP attempts.
+
+    #     Args:
+    #         start: Start joint configuration.
+    #         goal: Goal joint configuration.
+    #         smooth_path: Whether to simplify the resulting path.
+    #         num_waypoints: Number of states in the interpolated path.
+    #         benchmark: Retained for compatibility with the evaluation code.
+    #         log: Whether to print timing and attempt information.
+    #         timeout: Maximum wall-clock planning budget in seconds.
+
+    #     Returns:
+    #         waypoints: Array with shape (N, n_dof), or an empty array on failure.
+    #         planning_time: Wall-clock time spent attempting to plan.
+    #     """
+
+    #     if timeout <= 0:
+    #         raise ValueError(f"timeout must be positive, got {timeout}")
+
+    #     # Rebuild the VAMP environment because the goal object may have moved.
+    #     self.environment = self.build_environment()
+
+    #     start = np.asarray(start, dtype=float).tolist()
+    #     goal = np.asarray(goal, dtype=float).tolist()
+
+    #     expected_dimension = self.vamp_robot.dimension()
+
+    #     if len(start) != expected_dimension:
+    #         raise ValueError(
+    #             f"Expected {expected_dimension} start joints, "
+    #             f"got {len(start)}"
+    #         )
+
+    #     if len(goal) != expected_dimension:
+    #         raise ValueError(
+    #             f"Expected {expected_dimension} goal joints, "
+    #             f"got {len(goal)}"
+    #         )
+
+    #     empty = np.empty((0, self.n_dof), dtype=np.float32)
+
+    #     start_valid = self.vamp_robot.validate(
+    #         start,
+    #         self.environment,
+    #     )
+    #     goal_valid = self.vamp_robot.validate(
+    #         goal,
+    #         self.environment,
+    #     )
+
+    #     if not start_valid:
+    #         if log:
+    #             print("VAMP start state is invalid.")
+    #         # print("VAMP: Start invalid")
+    #         return empty, 0.0
+
+    #     if not goal_valid:
+    #         if log:
+    #             print("VAMP goal state is invalid.")
+    #         # print("VAMP: Goal invalid")
+    #         return empty, 0.0
+        
+    #     # Start the timeout after environment construction and state validation.
+    #     planning_start = time.perf_counter()
+    #     deadline = planning_start + timeout
+
+    #     result = None
+    #     attempts = 0
+    #     solver_time = 0.0
+
+    #     while time.perf_counter() < deadline:
+    #         attempts += 1
+
+    #         attempt_result = self.planner_fn(
+    #             start,
+    #             goal,
+    #             self.environment,
+    #             self.plan_settings,
+    #             self.sampler,
+    #         )
+
+    #         if attempt_result is None:
+    #             continue
+
+    #         solver_time += attempt_result.nanoseconds * 1e-9
+
+    #         if attempt_result.solved and attempt_result.path is not None:
+    #             result = attempt_result
+    #             break
+
+    #     if attempts > 1:
+    #         print(f"VAMP attempts: {attempts}")
+    #     planning_time = time.perf_counter() - planning_start
+
+    #     if result is None:
+    #         if log:
+    #             print(f"VAMP failed after {attempts} attempts.")
+    #             print(f"Solver time: {solver_time:.6f} s")
+    #             print(f"Wall planning time: {planning_time:.6f} s")
+
+    #         return empty, solver_time
+
+    #     path = result.path
+
+    #     # Planning timeout applies only to finding a solution.
+    #     # Simplification and interpolation happen afterward.
+    #     postprocess_start = time.perf_counter()
+
+    #     if smooth_path:
+    #         simplified = self.vamp_robot.simplify(
+    #             path,
+    #             self.environment,
+    #             self.simplify_settings,
+    #             self.sampler,
+    #         )
+
+    #         if simplified is not None and simplified.path is not None:
+    #             path = simplified.path
+
+    #     if num_waypoints is not None:
+    #         path.interpolate_to_n_states(int(num_waypoints))
+
+    #     waypoints = np.asarray(
+    #         path.numpy(),
+    #         dtype=np.float32,
+    #     )
+
+    #     if waypoints.ndim != 2 or waypoints.shape[1] != self.n_dof:
+    #         raise RuntimeError(
+    #             f"Unexpected VAMP path shape: {waypoints.shape}"
+    #         )
+
+    #     postprocess_time = time.perf_counter() - postprocess_start
+    #     total_time = planning_time + postprocess_time
+
+    #     if log:
+    #         print(f"VAMP attempts: {attempts}")
+    #         print(f"Solver time: {solver_time:.6f} s")
+    #         print(f"Wall time: {time.perf_counter() - planning_start:.6f} s")
+
+    #     return waypoints, solver_time
 
 
 class OMPLPlanner:

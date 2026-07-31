@@ -23,121 +23,11 @@ from coad.utils import set_seed, load_env_and_robot, get_data_folder
 from coad.env import FreeEnv, CageEnv, BoxEnv, TableEnv, ShelfEnv, LargeObjectEnv, MicrowaveEnv, AllStableEnv
 from coad.robot import Panda, UR10, FetchArm
 
+from experiments.evaluate_baselines import BoxGrid, sample_from_key
 
 folder1 = "dataset/top_naive"
 folder2 = "dataset/top"
 
-
-class BoxGrid:
-    def __init__(self, keys_to_root, tol=1e-12):
-
-        keys = np.asarray(list(keys_to_root.keys()), dtype=np.float64)
-        self.keys_list = list(keys_to_root.keys())
-        self.keys_arr = keys
-
-        if keys.ndim != 3 or keys.shape[1:] != (4, 2):
-            raise ValueError(f"Expected keys shape (N,4,2), got {keys.shape}")
-
-        mins = keys[:, :, 0].copy()
-        maxs = keys[:, :, 1].copy()
-
-        # Wrap yaw into [-pi, pi)
-        mins[:, 3] = self._wrap_pi(mins[:, 3])
-        maxs[:, 3] = self._wrap_pi(maxs[:, 3])
-
-        # ---------- X/Y: USE BIN STARTS DIRECTLY ----------
-        self.x_mins = np.sort(np.unique(mins[:, 0]))
-        self.y_mins = np.sort(np.unique(mins[:, 1]))
-
-        # Build fast lookup maps for construction
-        self._x_to_ix = {float(v): i for i, v in enumerate(self.x_mins)}
-        self._y_to_iy = {float(v): i for i, v in enumerate(self.y_mins)}
-
-        self.nx = len(self.x_mins)
-        self.ny = len(self.y_mins)
-
-        # ---------- Z: discrete levels ----------
-        self.z_values = np.sort(np.unique(mins[:, 2]))
-        self.nz = len(self.z_values)
-
-        # ---------- YAW: periodic bins ----------
-        yaw_mins = np.sort(np.unique(mins[:, 3]))
-        self.nyaw = len(yaw_mins) if yaw_mins.size else 1
-        self.yaw0 = float(yaw_mins[0]) if yaw_mins.size else 0.0
-
-        def spacing(vals, default=1.0):
-            vals = np.sort(np.unique(vals))
-            diffs = np.diff(vals)
-            diffs = diffs[diffs > tol]
-            return float(diffs.min()) if diffs.size else float(default)
-
-        self.dyaw = spacing(yaw_mins)
-
-        # ---------- BUILD INDEX ----------
-        self.index = {}
-
-        for bin_idx, key in enumerate(self.keys_list):
-
-            x_min, y_min, z_val, yaw_min = (
-                key[0][0],
-                key[1][0],
-                key[2][0],
-                key[3][0],
-            )
-
-            # X/Y via direct lookup
-            ix = self._x_to_ix[float(x_min)]
-            iy = self._y_to_iy[float(y_min)]
-
-            # Z
-            iz = int(np.argmin(np.abs(self.z_values - z_val)))
-
-            # Yaw
-            rel = self._wrap_pi(yaw_min - self.yaw0)
-            iyaw = int(np.floor(rel / self.dyaw + tol)) % self.nyaw
-
-            indices = (ix, iy, iz, iyaw)
-
-            if indices in self.index:
-                raise RuntimeError(f"Duplicate bin index {indices}")
-
-            self.index[indices] = bin_idx
-
-    def _bin_indices(self, sample, eps=1e-12):
-        x, y, z, yaw = sample
-        yaw = self._wrap_pi(yaw)
-
-        ix = int(np.searchsorted(self.x_mins, x, side="right") - 1)
-        iy = int(np.searchsorted(self.y_mins, y, side="right") - 1)
-
-        # clamp to valid range
-        ix = min(max(ix, 0), len(self.x_mins) - 1)
-        iy = min(max(iy, 0), len(self.y_mins) - 1)
-
-        if ix < 0 or ix >= self.nx or iy < 0 or iy >= self.ny:
-            return None
-
-        iz = int(np.argmin(np.abs(self.z_values - z)))  # discrete levels
-
-        rel = self._wrap_pi(yaw - self.yaw0)
-        iyaw = int(np.floor(rel / self.dyaw + eps)) % self.nyaw
-
-        return ix, iy, iz, iyaw
-
-    def query_point(self, sample):
-        indices = self._bin_indices(sample)
-        if indices is None:
-            return None
-
-        bin_idx = self.index.get(indices, None)
-        if bin_idx is None:
-            return None
-
-        return self.keys_list[bin_idx]
-
-    @staticmethod
-    def _wrap_pi(a):
-        return (a + np.pi) % (2 * np.pi) - np.pi
 
 
 def deep_tuple(x):
@@ -167,6 +57,90 @@ def get_avg_path_length(root_path, key_map):
 def wrap_pi(self, a):
     return (a + np.pi) % (2 * np.pi) - np.pi
 
+from collections import defaultdict
+import numpy as np
+
+
+def inspect_grid(task_set):
+    keys = list(task_set.keys())
+
+    has_face = (
+        len(keys[0]) == 5
+        and isinstance(keys[0][0], str)
+    )
+
+    groups = defaultdict(list)
+
+    for key in keys:
+        face = key[0] if has_face else None
+        numeric_key = key[1:] if has_face else key
+        groups[face].append(numeric_key)
+
+    for face, face_keys in groups.items():
+        print(f"\n=== Face: {face} ===")
+        print(f"Number of keys: {len(face_keys)}")
+
+        for dim, name in enumerate(["x", "y", "z", "yaw"]):
+            intervals = sorted({
+                (
+                    round(float(key[dim][0]), 10),
+                    round(float(key[dim][1]), 10),
+                )
+                for key in face_keys
+            })
+
+            starts = np.array(sorted({lo for lo, _ in intervals}))
+            widths = np.array(sorted({round(hi - lo, 10) for lo, hi in intervals}))
+
+            print(f"\n{name}:")
+            print(f"  unique intervals: {len(intervals)}")
+            print(f"  unique starts:    {len(starts)}")
+            print(f"  unique widths:    {widths}")
+
+            if len(starts) > 1:
+                steps = np.diff(starts)
+                print(
+                    "  unique start steps:",
+                    np.unique(np.round(steps, 10)),
+                )
+
+        unique_per_dim = [
+            {
+                (
+                    round(float(key[d][0]), 10),
+                    round(float(key[d][1]), 10),
+                )
+                for key in face_keys
+            }
+            for d in range(4)
+        ]
+
+        expected_cartesian_size = np.prod(
+            [len(values) for values in unique_per_dim]
+        )
+
+        actual_keys = {
+            tuple(
+                (
+                    round(float(interval[0]), 10),
+                    round(float(interval[1]), 10),
+                )
+                for interval in key
+            )
+            for key in face_keys
+        }
+
+        print("\nCartesian check:")
+        print(f"  dimension counts: {[len(v) for v in unique_per_dim]}")
+        print(f"  expected product: {expected_cartesian_size}")
+        print(f"  actual key count: {len(actual_keys)}")
+        print(
+            "  full Cartesian:",
+            len(actual_keys) == expected_cartesian_size,
+        )
+
+
+
 
 def evaluate_adaptations(
     args,
@@ -180,7 +154,8 @@ def evaluate_adaptations(
     model, data = robot.model, robot.data
     home_qpos = robot.get_joint_qpos()
 
-    ik_solver = get_ik_solver(robot, env_collision_geoms=env.collision_geoms)
+    # ik_solver = get_ik_solver(robot, env_collision_geoms=env.collision_geoms)
+    ik_solver = get_ik_solver(robot, env_collision_geoms=env.env_details['collision_geoms'])
     solved_task_paths_keys = [
         k
         for k, path in task_paths.items()
@@ -248,11 +223,12 @@ def evaluate_adaptations(
     )
     for i, key in enumerate(solved_task_paths_keys):
 
-        sample = []
-        for lo, hi in key:
-            x = np.random.uniform(lo, hi)
-            # x = np.nextafter(x, lo)
-            sample.append(x)
+        # sample = []
+        # for lo, hi in key:
+        #     x = np.random.uniform(lo, hi)
+        #     # x = np.nextafter(x, lo)
+        #     sample.append(x)
+        sample = sample_from_key(key)
         # env.move_cube_object(sample)
         env.move_object(sample)
 
@@ -261,7 +237,34 @@ def evaluate_adaptations(
         recovered_key_full = indexers[0].query_point(sample)
 
         if recovered_key_full is None:
-            print("full library failure")
+            indexer = indexers[0]
+
+            expected_indices = indexer.key_to_indices(key)
+            sampled_indices = indexer._bin_indices(sample)
+
+            print("\nFull library failure")
+            print("Original key:", key)
+            print("Sample:", sample)
+            print("Key exists:", key in indexer.keys_list)
+            print("Expected indices:", expected_indices)
+            print("Sample indices:  ", sampled_indices)
+            print(
+                "Expected index exists:",
+                expected_indices in indexer.index,
+            )
+            print(
+                "Sample index exists:",
+                sampled_indices in indexer.index
+                if sampled_indices is not None
+                else False,
+            )
+
+            if sampled_indices in indexer.index:
+                candidate_idx = indexer.index[sampled_indices]
+                candidate_key = indexer.keys_list[candidate_idx]
+                print("Candidate key:", candidate_key)
+
+            # break
 
             full_lib_success.append(False)
             full_end = time.perf_counter()
@@ -370,6 +373,7 @@ def main(args):
 
     try:
         task_set = pickle.load(open(f"{folder}/task_set.pkl", "rb"))
+        # inspect_grid(task_set)
         joint_goal_set = pickle.load(
             open(f"{folder}/joint_goal_set_{args.ik}.pkl", "rb")
         )
@@ -425,6 +429,8 @@ def main(args):
         env = FreeEnv(robot_name, using_swept_volume=False)
     elif env_name == "largeobj":
         env = LargeObjectEnv(robot_name, using_swept_volume=False)
+    elif env_name == "allstable":
+        env = AllStableEnv(robot_name, using_swept_volume=False)
     else:
         raise ValueError(f"Invalid environment: {env_name}")
 
@@ -476,12 +482,12 @@ def parse_arguments():
         "--ik", choices=["random", "neighbor", "grr"], default="neighbor"
     )
     parser.add_argument(
-        "--planner", choices=["RRTConnect", "PRMstar"], default="RRTConnect"
+        "--planner", choices=["RRTConnect", "PRMstar", "VAMP"], default="RRTConnect"
     )
     # parser.add_argument(
     #     "--adaptation", choices=["linear", "grr", "dmp", "opt"], default="grr"
     # )
-    parser.add_argument("--n_neighbors", type=int, default=1000)
+    parser.add_argument("--n_neighbors", type=int, default=100)
 
     args = parser.parse_args()
     return args

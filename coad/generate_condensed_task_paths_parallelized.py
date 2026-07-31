@@ -16,7 +16,7 @@ from coad.mink_ik import get_ik_solver
 from coad.adaptation import LinearAdapter, GRRAdapter
 from coad.adaptation import DMPAdapter, TrajOptAdapter
 
-from coad.planning import OMPLPlanner
+from coad.planning import OMPLPlanner, VAMPPlanner
 
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 import multiprocessing as mp
@@ -87,13 +87,25 @@ def _initialize_condensation_worker(
             f"Invalid adaptation method: {adaptation_name}"
         )
 
-    _WORKER_PLANNER = OMPLPlanner(
-        _WORKER_ROBOT,
-        _WORKER_ROBOT.data,
-        planner=planner_name,
-    )
+    if planner_name == "VAMP":
+        _WORKER_PLANNER = VAMPPlanner(
+            _WORKER_ROBOT,
+            _WORKER_ENV,
+        )
 
-    if planner_name == "PRMstar":
+        _WORKER_FALLBACK_PLANNER = OMPLPlanner(
+            _WORKER_ROBOT,
+            _WORKER_ROBOT.data,
+            planner="RRTConnect",
+        )
+
+    elif planner_name == "PRMstar":
+        _WORKER_PLANNER = OMPLPlanner(
+            _WORKER_ROBOT,
+            _WORKER_ROBOT.data,
+            planner="PRMstar",
+        )
+
         _WORKER_PLANNER.construct_roadmap(
             _WORKER_HOME_QPOS,
             timeout=60,
@@ -104,8 +116,18 @@ def _initialize_condensation_worker(
             _WORKER_ROBOT.data,
             planner="RRTConnect",
         )
-    else:
+
+    elif planner_name == "RRTConnect":
+        _WORKER_PLANNER = OMPLPlanner(
+            _WORKER_ROBOT,
+            _WORKER_ROBOT.data,
+            planner="RRTConnect",
+        )
+
         _WORKER_FALLBACK_PLANNER = None
+
+    else:
+        raise ValueError(f"Unsupported planner: {planner_name}")
 
 def _evaluate_root_candidate(center_key, candidate_neighbor_keys):
     """
@@ -137,6 +159,8 @@ def _evaluate_root_candidate(center_key, candidate_neighbor_keys):
         center_ik = _WORKER_JOINT_GOAL_SET[center_key].copy()
         _WORKER_ENV.move_swept_volume(center_key)
 
+        center_path = None
+
         if _WORKER_PLANNER_NAME == "RRTConnect":
             center_path, _, _ = _WORKER_PLANNER.plan(
                 start=_WORKER_HOME_QPOS,
@@ -145,21 +169,38 @@ def _evaluate_root_candidate(center_key, candidate_neighbor_keys):
                 num_waypoints=200,
                 benchmark=True,
             )
-        else:
+
+        elif _WORKER_PLANNER_NAME == "PRMstar":
             center_path = _WORKER_PLANNER.graph_query(
                 start=_WORKER_HOME_QPOS,
                 goal=center_ik,
                 num_waypoints=200,
             )
 
-            if center_path is None or len(center_path) == 0:
-                center_path, _, _ = _WORKER_FALLBACK_PLANNER.plan(
+        elif _WORKER_PLANNER_NAME == "VAMP":
+            try:
+                center_path, _, _ = _WORKER_PLANNER.plan(
                     start=_WORKER_HOME_QPOS,
                     goal=center_ik,
-                    timeout=3.0,
+                    smooth_path=True,
                     num_waypoints=200,
                     benchmark=True,
                 )
+            except Exception:
+                center_path = None
+
+        # PRMstar and VAMP both use RRTConnect as a fallback.
+        if (
+            _WORKER_FALLBACK_PLANNER is not None
+            and (center_path is None or len(center_path) == 0)
+        ):
+            center_path, _, _ = _WORKER_FALLBACK_PLANNER.plan(
+                start=_WORKER_HOME_QPOS,
+                goal=center_ik,
+                timeout=3.0,
+                num_waypoints=200,
+                benchmark=True,
+            )
 
         if center_path is None or len(center_path) == 0:
             return result
@@ -260,226 +301,6 @@ def _get_neighbor_keys(
     )[0]
 
     return [keys[int(nb_idx)] for nb_idx in neighbor_indices]
-
-def solve_joint_goal_set_condensed(
-    env: MujocoEnv,
-    robot: MujocoRobot,
-    joint_goal_set,
-    planner,
-    adaptation,
-    n_neighbors=100,
-):
-    model, data = robot.model, robot.data
-    home_qpos = robot.get_joint_qpos()
-
-    ik_solver = get_ik_solver(robot, env_collision_geoms=env.env_details['collision_geoms'])
-    if adaptation == "linear":
-        adapter = LinearAdapter(robot, ik_solver)
-    elif adaptation == "grr":
-        adapter = GRRAdapter(robot, ik_solver)
-    elif adaptation == "dmp":
-        adapter = DMPAdapter(robot, ik_solver)
-    elif adaptation == "opt":
-        adapter = TrajOptAdapter(robot, ik_solver)
-    else:
-        raise ValueError(f"Invalid adaptation method: {adaptation}")
-
-    # Build BallTree for finding nearby neighbors
-
-    if has_contact_face(env):
-        nn_by_face = {}
-        keys_by_face = {}
-
-        for face in ["xy", "yz", "zx"]:
-            face_task_set = {
-                key[1:]: joint_goal_set[key]
-                for key in joint_goal_set.keys()
-                if key[0] == face
-            }
-
-            nn, _ = build_task_nn(face_task_set)
-
-            nn_by_face[face] = nn
-            keys_by_face[face] = list(face_task_set.keys())
-    else:
-        nn, _ = build_task_nn(joint_goal_set)
-
-    keys = list(joint_goal_set.keys())
-    coverage_success = np.zeros(len(joint_goal_set), dtype=bool)
-
-    # If no solution for a task, we assume it is unsolvable.
-    # Get the successfully solved tasks.
-    remaining = set(
-        [
-            key
-            for key, val in joint_goal_set.items()
-            if val is not None
-        ]
-    )
-    print(f"Number of tasks: {len(joint_goal_set)}")
-    print(f"Number of successfully solved tasks: {len(remaining)}")
-
-    # Skip keys with IK failures
-    valid_keys = [
-        key
-        for key, goal in joint_goal_set.items()
-        if goal is not None
-    ]
-
-    # Result containers
-    root_paths = {}  # root_id -> root path
-    # key_to_root = {
-    #     key: (None, None) for key in joint_goal_set.keys()
-    # }  # key -> (root_id, goal_q)
-    # build_center_time = {key: np.nan for key in joint_goal_set.keys()}
-    # compress_time = {key: np.nan for key in joint_goal_set.keys()}
-
-    key_to_root = {
-        key: (None, None) for key in valid_keys
-    }
-    build_center_time = {
-        key: np.nan for key in valid_keys
-    }
-    compress_time = {
-        key: np.nan for key in valid_keys
-    }
-
-    # Planner
-    ompl_planner = OMPLPlanner(robot, data, planner=planner)
-
-    if (planner == "PRMstar"):
-        ompl_planner.construct_roadmap(
-            home_qpos,
-            timeout=10,
-        )
-        fallback_planner = OMPLPlanner(robot, data, "RRTConnect")
-    else:
-        fallback_planner = None
-
-    # Greedy condensation loop
-    pbar = tqdm(total=len(remaining))
-    
-    i = 0
-    while remaining:
-
-        # Pick a random center among remaining bins
-        center_key = list(remaining)[np.random.randint(0, len(remaining))]
-        env.move_swept_volume(center_key)
-        center_ik = joint_goal_set[center_key].copy()
-        
-        if planner == "RRTConnect":
-            center_path, total_time, planning_time = ompl_planner.plan(
-                start=home_qpos,
-                goal=center_ik,
-                timeout=3.0,
-                num_waypoints=200,
-                benchmark=True,
-            )
-        else:
-            center_path = ompl_planner.graph_query(
-                start=home_qpos,
-                goal=center_ik,
-                num_waypoints=200
-            )
-            if center_path is None or len(center_path) == 0:
-                center_path, _, _ = fallback_planner.plan(
-                    start=home_qpos,
-                    goal=center_ik,
-                    timeout=3.0,
-                    num_waypoints=200,
-                    benchmark=True,
-                )
-        
-        if center_path is None or len(center_path) == 0:
-            coverage_success[i] = False
-            remaining.remove(center_key)
-            pbar.update(1)
-            continue
-
-        # Register new root path
-        root_id = len(root_paths)
-        # build adaptation around the center path
-        t0 = time.perf_counter()
-        adapted_center, q_end = adapter.build_center(center_path)
-        t1 = time.perf_counter()
-        build_center_time[center_key] = t1 - t0
-        root_paths[root_id] = adapted_center
-        key_to_root[center_key] = (root_id, q_end)
-        remaining.remove(center_key)
-
-        # Visualization
-        if robot.viewer:
-            robot.set_joint_qpos(joint_goal_set[center_key])
-            robot.viewer.sync()
-        pbar.update(1)
-
-        # Query nearest neighbors and
-        # Consider those that are still in remaining
-
-        if has_contact_face(env):
-            face, numeric_key = split_key(center_key)
-            nn = nn_by_face[face]
-            key_arr = np.array(numeric_key)
-
-        else:
-            key_arr = np.array(center_key)
-        
-        key_center = (key_arr[:, 0] + key_arr[:, 1]) / 2
-        neighbor_indices = nn.query(
-            [key_center],
-            k=n_neighbors + 1,  # +1 for the center itself
-            return_distance=True,
-            sort_results=True,
-        )[1][0]
-
-        # Try to compress neighbors into this root.
-        for nb_idx in neighbor_indices:
-            nb_key = keys[nb_idx]
-            if nb_key not in remaining or nb_key == center_key:
-                continue
-            # nb_path = task_paths[nb_key].copy()
-            nb_goal = joint_goal_set[nb_key].copy()
-
-            # Set up neighbor environment
-            env.move_swept_volume(nb_key)
-            # Try to compress neighbor into this root.
-            t0 = time.perf_counter()
-            valid, q_nb_end = adapter.compress(adapted_center, nb_goal)
-            t1 = time.perf_counter()
-
-            if not valid:
-                continue
-
-            # Neighbor successfully compressed into this root.
-            compress_time[nb_key] = t1 - t0
-            key_to_root[nb_key] = (root_id, q_nb_end)
-            remaining.remove(nb_key)
-
-            # Visualization
-            if robot.viewer:
-                robot.set_joint_qpos(q_nb_end)
-                robot.viewer.sync()
-            pbar.update(1)
-
-        # Update tqdm message periodically
-        print_interval = 50
-        if len(root_paths) % print_interval == 0:
-            tqdm.write(
-                f"\nNumber of root paths:{len(root_paths)}."
-                + f"\nNumber of completed tasks:{pbar.total - len(remaining)}."
-            )
-
-    print("Condensation complete.")
-    print(f"Number of root paths: {len(root_paths)}")
-    results = np.stack(
-        [
-            list(build_center_time.values()),
-            list(compress_time.values()),
-        ],
-        axis=1,
-    )
-    return root_paths, key_to_root, results
-
 
 def solve_joint_goal_set_condensed_parallel(
     env: MujocoEnv,
@@ -823,7 +644,7 @@ def parse_arguments():
         "--ik", choices=["random", "neighbor", "grr"], default="neighbor"
     )
     parser.add_argument(
-        "--planner", choices=["RRTConnect", "PRMstar"], default="RRTConnect"
+        "--planner", choices=["RRTConnect", "PRMstar", "VAMP"], default="RRTConnect"
     )
     parser.add_argument(
         "--adaptation", choices=["linear", "grr", "dmp", "opt"], default="grr"

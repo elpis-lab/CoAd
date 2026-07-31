@@ -212,8 +212,8 @@ def convert_task_to_joint_goal(
         # key_arr = np.array(key)
         # key_center = (key_arr[:, 0] + key_arr[:, 1]) / 2
         
-        if (i % 15000 == 0):
-            print(f"key: {key}")
+        # if (i % 15000 == 0):
+        #     print(f"key: {key}")
 
         original_key = key
         env.move_swept_volume(original_key)
@@ -268,9 +268,9 @@ def convert_task_to_joint_goal(
             joint_goal_set[key] = solution
 
         # Update viewer
-        if robot.viewer is not None:
+        if robot.viewer is not None and valid_ik:
             robot.viewer.sync()
-            # input("Proceed?")
+            input("IK Success. Proceed?")
 
         # Update tqdm message periodically
         print_interval = 1000

@@ -16,7 +16,7 @@ from coad.mink_ik import get_ik_solver
 from coad.adaptation import LinearAdapter, GRRAdapter
 from coad.adaptation import DMPAdapter, TrajOptAdapter
 
-from coad.planning import OMPLPlanner
+from coad.planning import OMPLPlanner, VAMPPlanner
 
 def solve_joint_goal_set_condensed(
     env: MujocoEnv,
@@ -102,16 +102,46 @@ def solve_joint_goal_set_condensed(
     }
 
     # Planner
-    ompl_planner = OMPLPlanner(robot, data, planner=planner)
+    primary_planner = None
+    fallback_planner = None
 
-    if (planner == "PRMstar"):
-        ompl_planner.construct_roadmap(
+    if planner == "VAMP":
+        primary_planner = VAMPPlanner(robot, env)
+
+        # VAMP cannot represent every MuJoCo geometry/environment exactly,
+        # so use OMPL RRTConnect whenever VAMP fails.
+        fallback_planner = OMPLPlanner(
+            robot,
+            data,
+            planner="RRTConnect",
+        )
+
+    elif planner == "PRMstar":
+        primary_planner = OMPLPlanner(
+            robot,
+            data,
+            planner="PRMstar",
+        )
+        primary_planner.construct_roadmap(
             home_qpos,
             timeout=10,
         )
-        fallback_planner = OMPLPlanner(robot, data, "RRTConnect")
+
+        fallback_planner = OMPLPlanner(
+            robot,
+            data,
+            planner="RRTConnect",
+        )
+
+    elif planner == "RRTConnect":
+        primary_planner = OMPLPlanner(
+            robot,
+            data,
+            planner="RRTConnect",
+        )
+
     else:
-        fallback_planner = None
+        raise ValueError(f"Unsupported planner: {planner}")
 
     # Greedy condensation loop
     pbar = tqdm(total=len(remaining))
@@ -124,28 +154,54 @@ def solve_joint_goal_set_condensed(
         env.move_swept_volume(center_key)
         center_ik = joint_goal_set[center_key].copy()
         
+        center_path = None
+
         if planner == "RRTConnect":
-            center_path, total_time, planning_time = ompl_planner.plan(
+            center_path, _, _ = primary_planner.plan(
                 start=home_qpos,
                 goal=center_ik,
                 timeout=3.0,
                 num_waypoints=200,
                 benchmark=True,
             )
-        else:
-            center_path = ompl_planner.graph_query(
+
+        elif planner == "PRMstar":
+            center_path = primary_planner.graph_query(
                 start=home_qpos,
                 goal=center_ik,
-                num_waypoints=200
+                num_waypoints=200,
             )
-            if center_path is None or len(center_path) == 0:
-                center_path, _, _ = fallback_planner.plan(
+
+        elif planner == "VAMP":
+            try:
+                center_path, _, _ = primary_planner.plan(
                     start=home_qpos,
                     goal=center_ik,
-                    timeout=3.0,
+                    smooth_path=True,
                     num_waypoints=200,
                     benchmark=True,
                 )
+            except Exception as exc:
+                center_path = None
+
+        # PRMstar and VAMP both use RRTConnect as a fallback.
+        if (
+            fallback_planner is not None
+            and (center_path is None or len(center_path) == 0)
+        ):
+            if planner == "VAMP":
+                tqdm.write(
+                    f"VAMP found no path for center {center_key}; "
+                    "trying RRTConnect."
+                )
+
+            center_path, _, _ = fallback_planner.plan(
+                start=home_qpos,
+                goal=center_ik,
+                timeout=3.0,
+                num_waypoints=200,
+                benchmark=True,
+            )
         
         if center_path is None or len(center_path) == 0:
             coverage_success[i] = False
@@ -495,7 +551,7 @@ def parse_arguments():
         "--ik", choices=["random", "neighbor", "grr"], default="neighbor"
     )
     parser.add_argument(
-        "--planner", choices=["RRTConnect", "PRMstar"], default="RRTConnect"
+        "--planner", choices=["RRTConnect", "PRMstar", "VAMP"], default="RRTConnect"
     )
     parser.add_argument(
         "--adaptation", choices=["linear", "grr", "dmp", "opt"], default="grr"
