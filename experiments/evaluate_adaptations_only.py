@@ -23,121 +23,123 @@ from coad.utils import set_seed, load_env_and_robot, get_data_folder
 from coad.env import FreeEnv, CageEnv, BoxEnv, TableEnv, ShelfEnv, LargeObjectEnv, MicrowaveEnv, AllStableEnv
 from coad.robot import Panda, UR10, FetchArm
 
+from experiments.evaluate_baselines import BoxGrid, sample_from_key
 
 folder1 = "dataset/top_naive"
 folder2 = "dataset/top"
 
 
-class BoxGrid:
-    def __init__(self, keys_to_root, tol=1e-12):
 
-        keys = np.asarray(list(keys_to_root.keys()), dtype=np.float64)
-        self.keys_list = list(keys_to_root.keys())
-        self.keys_arr = keys
+# class BoxGrid:
+#     def __init__(self, keys_to_root, tol=1e-12):
 
-        if keys.ndim != 3 or keys.shape[1:] != (4, 2):
-            raise ValueError(f"Expected keys shape (N,4,2), got {keys.shape}")
+#         keys = np.asarray(list(keys_to_root.keys()), dtype=np.float64)
+#         self.keys_list = list(keys_to_root.keys())
+#         self.keys_arr = keys
 
-        mins = keys[:, :, 0].copy()
-        maxs = keys[:, :, 1].copy()
+#         if keys.ndim != 3 or keys.shape[1:] != (4, 2):
+#             raise ValueError(f"Expected keys shape (N,4,2), got {keys.shape}")
 
-        # Wrap yaw into [-pi, pi)
-        mins[:, 3] = self._wrap_pi(mins[:, 3])
-        maxs[:, 3] = self._wrap_pi(maxs[:, 3])
+#         mins = keys[:, :, 0].copy()
+#         maxs = keys[:, :, 1].copy()
 
-        # ---------- X/Y: USE BIN STARTS DIRECTLY ----------
-        self.x_mins = np.sort(np.unique(mins[:, 0]))
-        self.y_mins = np.sort(np.unique(mins[:, 1]))
+#         # Wrap yaw into [-pi, pi)
+#         mins[:, 3] = self._wrap_pi(mins[:, 3])
+#         maxs[:, 3] = self._wrap_pi(maxs[:, 3])
 
-        # Build fast lookup maps for construction
-        self._x_to_ix = {float(v): i for i, v in enumerate(self.x_mins)}
-        self._y_to_iy = {float(v): i for i, v in enumerate(self.y_mins)}
+#         # ---------- X/Y: USE BIN STARTS DIRECTLY ----------
+#         self.x_mins = np.sort(np.unique(mins[:, 0]))
+#         self.y_mins = np.sort(np.unique(mins[:, 1]))
 
-        self.nx = len(self.x_mins)
-        self.ny = len(self.y_mins)
+#         # Build fast lookup maps for construction
+#         self._x_to_ix = {float(v): i for i, v in enumerate(self.x_mins)}
+#         self._y_to_iy = {float(v): i for i, v in enumerate(self.y_mins)}
 
-        # ---------- Z: discrete levels ----------
-        self.z_values = np.sort(np.unique(mins[:, 2]))
-        self.nz = len(self.z_values)
+#         self.nx = len(self.x_mins)
+#         self.ny = len(self.y_mins)
 
-        # ---------- YAW: periodic bins ----------
-        yaw_mins = np.sort(np.unique(mins[:, 3]))
-        self.nyaw = len(yaw_mins) if yaw_mins.size else 1
-        self.yaw0 = float(yaw_mins[0]) if yaw_mins.size else 0.0
+#         # ---------- Z: discrete levels ----------
+#         self.z_values = np.sort(np.unique(mins[:, 2]))
+#         self.nz = len(self.z_values)
 
-        def spacing(vals, default=1.0):
-            vals = np.sort(np.unique(vals))
-            diffs = np.diff(vals)
-            diffs = diffs[diffs > tol]
-            return float(diffs.min()) if diffs.size else float(default)
+#         # ---------- YAW: periodic bins ----------
+#         yaw_mins = np.sort(np.unique(mins[:, 3]))
+#         self.nyaw = len(yaw_mins) if yaw_mins.size else 1
+#         self.yaw0 = float(yaw_mins[0]) if yaw_mins.size else 0.0
 
-        self.dyaw = spacing(yaw_mins)
+#         def spacing(vals, default=1.0):
+#             vals = np.sort(np.unique(vals))
+#             diffs = np.diff(vals)
+#             diffs = diffs[diffs > tol]
+#             return float(diffs.min()) if diffs.size else float(default)
 
-        # ---------- BUILD INDEX ----------
-        self.index = {}
+#         self.dyaw = spacing(yaw_mins)
 
-        for bin_idx, key in enumerate(self.keys_list):
+#         # ---------- BUILD INDEX ----------
+#         self.index = {}
 
-            x_min, y_min, z_val, yaw_min = (
-                key[0][0],
-                key[1][0],
-                key[2][0],
-                key[3][0],
-            )
+#         for bin_idx, key in enumerate(self.keys_list):
 
-            # X/Y via direct lookup
-            ix = self._x_to_ix[float(x_min)]
-            iy = self._y_to_iy[float(y_min)]
+#             x_min, y_min, z_val, yaw_min = (
+#                 key[0][0],
+#                 key[1][0],
+#                 key[2][0],
+#                 key[3][0],
+#             )
 
-            # Z
-            iz = int(np.argmin(np.abs(self.z_values - z_val)))
+#             # X/Y via direct lookup
+#             ix = self._x_to_ix[float(x_min)]
+#             iy = self._y_to_iy[float(y_min)]
 
-            # Yaw
-            rel = self._wrap_pi(yaw_min - self.yaw0)
-            iyaw = int(np.floor(rel / self.dyaw + tol)) % self.nyaw
+#             # Z
+#             iz = int(np.argmin(np.abs(self.z_values - z_val)))
 
-            indices = (ix, iy, iz, iyaw)
+#             # Yaw
+#             rel = self._wrap_pi(yaw_min - self.yaw0)
+#             iyaw = int(np.floor(rel / self.dyaw + tol)) % self.nyaw
 
-            if indices in self.index:
-                raise RuntimeError(f"Duplicate bin index {indices}")
+#             indices = (ix, iy, iz, iyaw)
 
-            self.index[indices] = bin_idx
+#             if indices in self.index:
+#                 raise RuntimeError(f"Duplicate bin index {indices}")
 
-    def _bin_indices(self, sample, eps=1e-12):
-        x, y, z, yaw = sample
-        yaw = self._wrap_pi(yaw)
+#             self.index[indices] = bin_idx
 
-        ix = int(np.searchsorted(self.x_mins, x, side="right") - 1)
-        iy = int(np.searchsorted(self.y_mins, y, side="right") - 1)
+#     def _bin_indices(self, sample, eps=1e-12):
+#         x, y, z, yaw = sample
+#         yaw = self._wrap_pi(yaw)
 
-        # clamp to valid range
-        ix = min(max(ix, 0), len(self.x_mins) - 1)
-        iy = min(max(iy, 0), len(self.y_mins) - 1)
+#         ix = int(np.searchsorted(self.x_mins, x, side="right") - 1)
+#         iy = int(np.searchsorted(self.y_mins, y, side="right") - 1)
 
-        if ix < 0 or ix >= self.nx or iy < 0 or iy >= self.ny:
-            return None
+#         # clamp to valid range
+#         ix = min(max(ix, 0), len(self.x_mins) - 1)
+#         iy = min(max(iy, 0), len(self.y_mins) - 1)
 
-        iz = int(np.argmin(np.abs(self.z_values - z)))  # discrete levels
+#         if ix < 0 or ix >= self.nx or iy < 0 or iy >= self.ny:
+#             return None
 
-        rel = self._wrap_pi(yaw - self.yaw0)
-        iyaw = int(np.floor(rel / self.dyaw + eps)) % self.nyaw
+#         iz = int(np.argmin(np.abs(self.z_values - z)))  # discrete levels
 
-        return ix, iy, iz, iyaw
+#         rel = self._wrap_pi(yaw - self.yaw0)
+#         iyaw = int(np.floor(rel / self.dyaw + eps)) % self.nyaw
 
-    def query_point(self, sample):
-        indices = self._bin_indices(sample)
-        if indices is None:
-            return None
+#         return ix, iy, iz, iyaw
 
-        bin_idx = self.index.get(indices, None)
-        if bin_idx is None:
-            return None
+#     def query_point(self, sample):
+#         indices = self._bin_indices(sample)
+#         if indices is None:
+#             return None
 
-        return self.keys_list[bin_idx]
+#         bin_idx = self.index.get(indices, None)
+#         if bin_idx is None:
+#             return None
 
-    @staticmethod
-    def _wrap_pi(a):
-        return (a + np.pi) % (2 * np.pi) - np.pi
+#         return self.keys_list[bin_idx]
+
+#     @staticmethod
+#     def _wrap_pi(a):
+#         return (a + np.pi) % (2 * np.pi) - np.pi
 
 
 def deep_tuple(x):
@@ -174,23 +176,22 @@ def evaluate_adaptations(
     robot: MujocoRobot,
     folder,
     task_set,
-    task_paths,
     adaptations,
 ):
     model, data = robot.model, robot.data
     home_qpos = robot.get_joint_qpos()
 
-    ik_solver = get_ik_solver(robot, env_collision_geoms=env.collision_geoms)
-    solved_task_paths_keys = [
-        k
-        for k, path in task_paths.items()
-        if path is not None and len(path) > 0
-    ]
-    solved_task_paths = {
-        k: v for k, v in task_paths.items() if v is not None and len(v) > 0
-    }
+    ik_solver = get_ik_solver(robot, env_collision_geoms=env.env_details['collision_geoms'])
+    # solved_task_paths_keys = [
+    #     k
+    #     for k, path in task_paths.items()
+    #     if path is not None and len(path) > 0
+    # ]
+    # solved_task_paths = {
+    #     k: v for k, v in task_paths.items() if v is not None and len(v) > 0
+    # }
+    # print(f"Number of solved paths: {len(solved_task_paths_keys)}")
 
-    print(f"Number of solved paths: {len(solved_task_paths_keys)}")
 
     adapters = []
     key_to_roots = []
@@ -237,18 +238,37 @@ def evaluate_adaptations(
             raise ValueError(f"Invalid adaptation method: {adaptation}")
         adapters.append(adapter)
 
-    pbar = tqdm(
-        enumerate(solved_task_paths_keys), total=len(solved_task_paths_keys)
-    )
-    for i, key in enumerate(solved_task_paths_keys):
+    reference_key_to_root = key_to_roots[0]
+    
+    solved_keys = [
+        key
+        for key, (root_id, goal) in reference_key_to_root.items()
+        if root_id is not None and goal is not None
+    ]
 
-        sample = []
-        for lo, hi in key:
-            x = np.random.uniform(lo, hi)
-            # x = np.nextafter(x, lo)
-            sample.append(x)
-        # env.move_cube_object(sample)
-        env.move_object(sample)
+    print(f"Number of reference adaptation keys: {len(solved_keys)}")
+
+    # pbar = tqdm(
+    #     enumerate(solved_task_paths_keys), total=len(solved_task_paths_keys)
+    # )
+    # for i, key in enumerate(solved_task_paths_keys):
+
+    pbar = tqdm(
+        enumerate(solved_keys),
+        total=len(solved_keys)
+    )
+
+    for i, key in enumerate(solved_keys):
+
+        sample = sample_from_key(key)
+
+        if isinstance(env, MicrowaveEnv):
+            pos_sample = sample[0:4]
+            door_sample = sample[4]
+            env.move_object(pos_sample)
+            env.move_xml_joint("microwave_door_hinge", door_sample)
+        else:
+            env.move_object(sample)
 
         # Benchmark each adaptation
         for adaptation_ind, adaptation in enumerate(adaptations):
@@ -269,6 +289,9 @@ def evaluate_adaptations(
                 # print(sample)
                 print(f"{adaptation} recovered key: {recovered_key_adapt}")
                 input()
+
+            if root_id is None:
+                continue
 
             curr_root = root_paths_list[adaptation_ind][root_id]
             adapted_path = adapters[adaptation_ind].adapt(curr_root, curr_goal)
@@ -324,11 +347,11 @@ def main(args):
         joint_goal_set = pickle.load(
             open(f"{folder}/joint_goal_set_{args.ik}.pkl", "rb")
         )
-        d_name = f"{folder}/task_paths_data_{args.ik}_{args.planner}.npy"
-        data = np.load(d_name, allow_pickle=True)
-        k_name = f"{folder}/task_paths_keys_{args.ik}_{args.planner}.pkl"
-        keys = pickle.load(open(k_name, "rb"))
-        task_paths = {key: data for key, data in zip(keys, data)}
+        # d_name = f"{folder}/task_paths_data_{args.ik}_{args.planner}.npy"
+        # data = np.load(d_name, allow_pickle=True)
+        # k_name = f"{folder}/task_paths_keys_{args.ik}_{args.planner}.pkl"
+        # keys = pickle.load(open(k_name, "rb"))
+        # task_paths = {key: data for key, data in zip(keys, data)}
 
     except FileNotFoundError as e:
         print(e)
@@ -336,13 +359,13 @@ def main(args):
         return
 
     IK_solved = sum(v is not None for v in joint_goal_set.values())
-    planner_solved = sum(
-        v is not None and len(v) > 1 for v in task_paths.values()
-    )
+    # planner_solved = sum(
+    #     v is not None and len(v) > 1 for v in task_paths.values()
+    # )
 
     print(f"Number of generated tasks: {len(task_set)}")
     print(f"Number of tasks solved by IK: {IK_solved}")
-    print(f"Number of paths solved by {args.planner}: {planner_solved}")
+    # print(f"Number of paths solved by {args.planner}: {planner_solved}")
 
     adaptations_found = []
     for adaptation in ["grr", "opt", "dmp"]:
@@ -376,6 +399,10 @@ def main(args):
         env = FreeEnv(robot_name, using_swept_volume=False)
     elif env_name == "largeobj":
         env = LargeObjectEnv(robot_name, using_swept_volume=False)
+    elif env_name == "microwave":
+        env = MicrowaveEnv(robot_name, using_swept_volume=False)
+    elif env_name == "allstable":
+        env = AllStableEnv(robot_name, using_swept_volume=False)
     else:
         raise ValueError(f"Invalid environment: {env_name}")
 
@@ -400,7 +427,7 @@ def main(args):
     # planning_results = np.load(planning_results_path)
 
     evaluate_adaptations(
-        args, env, robot, folder, task_set, task_paths, adaptations_found
+        args, env, robot, folder, task_set, adaptations_found
     )
 
 

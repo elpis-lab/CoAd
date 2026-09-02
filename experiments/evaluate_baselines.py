@@ -2733,7 +2733,8 @@ def evaluate_graph(
 
     # Building library baseline with N = reference adaptation key count.
     # This keeps the library baseline while avoiding task_paths_data_*.npy.
-    N = len(solved_keys)
+    # N = len(solved_keys)
+    N = min(100_000, max(len(root_paths) for root_paths in root_paths_list))
     print("\n=== Building library ===")
     library = Library(
         N,

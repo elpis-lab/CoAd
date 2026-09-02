@@ -258,10 +258,12 @@ class VAMPPlanner:
         geom_world_pos,
         geom_world_rot,
     ):
-        if primitive["type"] != "cuboid":
+        primitive_type = primitive["type"]
+
+        if primitive_type not in {"cuboid", "cylinder"}:
             raise ValueError(
-                f"Unsupported saved primitive type: "
-                f"{primitive['type']}"
+                "Unsupported saved primitive type: "
+                f"{primitive_type}"
             )
 
         primitive_local_pos = np.asarray(
@@ -274,11 +276,6 @@ class VAMPPlanner:
             dtype=float,
         ).reshape(3, 3)
 
-        half_extents = np.asarray(
-            primitive["half_extents"],
-            dtype=float,
-        )
-
         # Geom-local primitive pose -> MuJoCo world pose.
         primitive_world_pos = (
             geom_world_pos
@@ -290,7 +287,7 @@ class VAMPPlanner:
             @ primitive_local_rot
         )
 
-        # MuJoCo world pose -> robot base / VAMP pose.
+        # MuJoCo world pose -> robot-base/VAMP pose.
         base_pos, base_rot = self.world_pose_to_base(
             primitive_world_pos,
             primitive_world_rot,
@@ -300,13 +297,34 @@ class VAMPPlanner:
             base_rot
         ).as_euler("xyz")
 
-        vamp_env.add_cuboid(
-            vamp.Cuboid(
+        if primitive_type == "cuboid":
+            half_extents = np.asarray(
+                primitive["half_extents"],
+                dtype=float,
+            )
+
+            vamp_env.add_cuboid(
+                vamp.Cuboid(
+                    base_pos.tolist(),
+                    base_euler.tolist(),
+                    half_extents.tolist(),
+                )
+            )
+
+        elif primitive_type == "cylinder":
+            radius = float(primitive["radius"])
+            length = float(primitive["length"])
+
+            cylinder = vamp.Cylinder(
                 base_pos.tolist(),
                 base_euler.tolist(),
-                half_extents.tolist(),
+                radius,
+                length,
             )
-        )
+
+            # This is the method already used for ordinary
+            # MuJoCo cylinder geoms.
+            vamp_env.add_capsule(cylinder)
 
     def plan(
         self,

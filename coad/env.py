@@ -169,51 +169,71 @@ class MujocoEnv:
 
             Tew[2, 3] = ee_z_offset + sz / 2.0
 
-            yaw_angles, x_fits, y_fits = valid_grasp_yaw_offsets(
-                self.object_details,
-                2.0 * half_finger_clearance,
-            )
-            if isinstance(self, TableEnv):    
-                offsets = [np.pi/2, -np.pi/2]
-            else:
-                offsets = [0.0, np.pi]
+            if self.object_details["type"] == "cylinder":
+                radius = sx / 2.0
 
-            Tews = make_Tew_yaw_variants(Tew, offsets)
+                del_geom_x = half_finger_clearance - radius
+                del_geom_y = half_finger_clearance - radius
 
-            clearance_size_x = sx
-            clearance_size_y = sy
+                if del_geom_x < 0.0 or del_geom_y < 0.0:
+                    raise ValueError(
+                        "Cylinder does not fit inside the gripper: "
+                        f"radius={radius}, "
+                        f"half_clearance={half_finger_clearance}"
+                    )
 
-            if y_fits and not x_fits:
-                # Long object along x, narrow along y.
-                long_axis_slide = max(0.0, clearance_size_x / 2.0 - min_contact_overlap)
-                del_geom_x = long_axis_slide
-                del_geom_x /= 2.0
-                del_geom_y = half_finger_clearance - clearance_size_y / 2.0
-                del_geom_y /= 1.0
-
-            elif x_fits and not y_fits:
-                # Long object along y, narrow along x.
-                long_axis_slide = max(0.0, clearance_size_y / 2.0 - min_contact_overlap)
-                del_geom_y = long_axis_slide
-                del_geom_x = half_finger_clearance - clearance_size_x / 2.0
-                del_geom_x /= 1.0
-
-            elif x_fits and y_fits:
-                # Object fits both ways. Pick a consistent convention.
-                long_axis_slide = max(0.0, clearance_size_y / 2.0 - min_contact_overlap)
-                del_geom_y = long_axis_slide
-                del_geom_x = half_finger_clearance - clearance_size_x / 2.0
+                # Rotation about the cylinder's symmetry axis does not
+                # produce a distinct grasp.
+                Tews = [Tew]
 
             else:
-                raise ValueError("Object does not fit the gripper in either x or y.")
+                # Existing box logic begins here.
 
-            # print(f"xfits: {x_fits}")
-            # print(f"yfits: {y_fits}")
+                yaw_angles, x_fits, y_fits = valid_grasp_yaw_offsets(
+                    self.object_details,
+                    2.0 * half_finger_clearance,
+                )
+                if isinstance(self, TableEnv):    
+                    offsets = [np.pi/2, -np.pi/2]
+                else:
+                    offsets = [0.0, np.pi]
 
-            del_geom_x, del_geom_y = translational_half_extents(
-                del_geom_x,
-                del_geom_y,
-            )
+                Tews = make_Tew_yaw_variants(Tew, offsets)
+
+                clearance_size_x = sx
+                clearance_size_y = sy
+
+                if y_fits and not x_fits:
+                    # Long object along x, narrow along y.
+                    long_axis_slide = max(0.0, clearance_size_x / 2.0 - min_contact_overlap)
+                    del_geom_x = long_axis_slide
+                    del_geom_x /= 2.0
+                    del_geom_y = half_finger_clearance - clearance_size_y / 2.0
+                    del_geom_y /= 1.0
+
+                elif x_fits and not y_fits:
+                    # Long object along y, narrow along x.
+                    long_axis_slide = max(0.0, clearance_size_y / 2.0 - min_contact_overlap)
+                    del_geom_y = long_axis_slide
+                    del_geom_x = half_finger_clearance - clearance_size_x / 2.0
+                    del_geom_x /= 1.0
+
+                elif x_fits and y_fits:
+                    # Object fits both ways. Pick a consistent convention.
+                    long_axis_slide = max(0.0, clearance_size_y / 2.0 - min_contact_overlap)
+                    del_geom_y = long_axis_slide
+                    del_geom_x = half_finger_clearance - clearance_size_x / 2.0
+
+                else:
+                    raise ValueError("Object does not fit the gripper in either x or y.")
+
+                # print(f"xfits: {x_fits}")
+                # print(f"yfits: {y_fits}")
+
+                del_geom_x, del_geom_y = translational_half_extents(
+                    del_geom_x,
+                    del_geom_y,
+                )
 
         elif self.grasp_details["type"] == "front":
             # Canonical front grasp: approach horizontally.
@@ -318,12 +338,24 @@ class MujocoEnv:
         env_name = self.env_details['env_name']
         tcr_batches = self.env_details.get('tcr_batches', None)
 
-        if self.env_details["robot"] not in  {"panda", "fetch", "g1"}:
-            raise ValueError(f"Unsupported robot: {self.env_details['robot']}")
+        if self.env_details["robot"] not in {
+            "panda",
+            "fetch",
+            "g1",
+            "ur10",
+        }:
+            raise ValueError(
+                f"Unsupported robot: {self.env_details['robot']}"
+            )
 
-        if self.object_details["type"] not in ['box', 'microwave']:
-            raise ValueError(f"Unsupported object type: {self.object_details['type']}")
-
+        if self.object_details["type"] not in {
+            "box",
+            "cylinder",
+            "microwave",
+        }:
+            raise ValueError(
+                f"Unsupported object type: {self.object_details['type']}"
+            )
         
         if self.env_details['robot'] == "panda":    
             half_finger_clearance = 0.038
@@ -342,6 +374,11 @@ class MujocoEnv:
             half_finger_length = 0.01
             ee_z_offset = 0.0
             ee_offset = 0.016
+        elif self.env_details["robot"] == "ur10":
+            half_finger_clearance = 0.05
+            half_finger_length = 0.05
+            ee_z_offset = -0.04
+            ee_offset = 0.0
 
         if tcr_batches is not None:
             num_tcr_batches = len(tcr_batches)
@@ -369,6 +406,16 @@ class MujocoEnv:
                 # Use door dimensions
                 sx, sy, sz = map(float, self.object_details["handle_size"])
 
+            elif self.object_details["type"] == "cylinder":
+                radius, height = map(
+                    float,
+                    self.object_details["size"],
+                )
+
+                sx = 2.0 * radius
+                sy = 2.0 * radius
+                sz = height
+
             del_geom_x, del_geom_y = self.initial_tcr_construction(
                 sx,
                 sy,
@@ -380,11 +427,35 @@ class MujocoEnv:
                 min_contact_overlap
             )
 
+            # initial_tcr_intervals = {
+            #     "x": (alpha * np.array([-del_geom_x, 0.0, del_geom_x])).tolist(),
+            #     "y": (alpha * np.array([-del_geom_y, 0.0, del_geom_y])).tolist(),
+            #     "yaw": (alpha * np.array([-yaw_buffer / 2.0, 0.0, yaw_buffer / 2.0])).tolist(),
+            # }
+
             initial_tcr_intervals = {
-                "x": (alpha * np.array([-del_geom_x, 0.0, del_geom_x])).tolist(),
-                "y": (alpha * np.array([-del_geom_y, 0.0, del_geom_y])).tolist(),
-                "yaw": (alpha * np.array([-yaw_buffer / 2.0, 0.0, yaw_buffer / 2.0])).tolist(),
+                "x": (
+                    alpha * np.array(
+                        [-del_geom_x, 0.0, del_geom_x]
+                    )
+                ).tolist(),
+                "y": (
+                    alpha * np.array(
+                        [-del_geom_y, 0.0, del_geom_y]
+                    )
+                ).tolist(),
             }
+
+            if self.object_details["type"] != "cylinder":
+                initial_tcr_intervals["yaw"] = (
+                    alpha * np.array(
+                        [
+                            -yaw_buffer / 2.0,
+                            0.0,
+                            yaw_buffer / 2.0,
+                        ]
+                    )
+                ).tolist()
 
             if self.object_details['type'] == "microwave":
                 door_buffer = self.grasp_details['door_buffer']
@@ -403,14 +474,22 @@ class MujocoEnv:
         return tcr_intervals_batches
         # return tcr_intervals
     
-    def sample_tcr_intervals(self, initial_tcr_intervals):
-        dims = ["x", "y", "yaw"]
+    # def sample_tcr_intervals(self, initial_tcr_intervals):
+    #     dims = ["x", "y", "yaw"]
 
-        if "door" in initial_tcr_intervals:
-            dims.append("door")
+    #     if "door" in initial_tcr_intervals:
+    #         dims.append("door")
         
-        for values in itertools.product(*(initial_tcr_intervals[d] for d in dims)):
-            yield dict(zip(dims, values))
+    #     for values in itertools.product(*(initial_tcr_intervals[d] for d in dims)):
+    #         yield dict(zip(dims, values))
+
+    def sample_tcr_intervals(self, intervals):
+        dimensions = list(intervals)
+
+        for values in itertools.product(
+            *(intervals[dimension] for dimension in dimensions)
+        ):
+            yield dict(zip(dimensions, values))
 
     def find_tcr_intervals(self, initial_tcr_intervals, ee_offsets, contact_face=None):
 
@@ -440,6 +519,8 @@ class MujocoEnv:
         elif self.env_details['robot'] == "fetch":
             robot_pos = [0, 0, 0.005]
         elif self.env_details['robot'] == "g1":
+            robot_pos = [0, 0, 0]
+        elif self.env_details["robot"] == "ur10":
             robot_pos = [0, 0, 0]
 
 
@@ -479,6 +560,8 @@ class MujocoEnv:
             tempRobot = FetchArm(tempModel, tempData, visualizeTemp)
         elif self.env_details['robot'] == "g1":
             tempRobot = G1(tempModel, tempData, visualizeTemp)
+        elif self.env_details['robot'] == "ur10":
+            tempRobot = UR10(tempModel, tempData, visualizeTemp)
         else:
             raise NotImplemented(f"Robot not supported: {self.env_details['robot']}")
 
@@ -486,7 +569,12 @@ class MujocoEnv:
         
         nominal_x = 0
         nominal_y = 0
-        nominal_z = new_object_size[2]/2
+
+        if self.object_details["type"] == "cylinder":
+            nominal_z = new_object_size[1] / 2.0
+        else:
+            nominal_z = new_object_size[2] / 2.0
+
         nominal_yaw = 0
 
         if isinstance(self, MicrowaveEnv):
@@ -545,23 +633,23 @@ class MujocoEnv:
         targets = [matrix_to_flat(obj_pose @ offset) for offset in ee_offsets]
         n_attempts = 10
 
-        for i, offset in enumerate(ee_offsets):
-            T_world_ee = obj_pose @ offset
+        # for i, offset in enumerate(ee_offsets):
+        #     T_world_ee = obj_pose @ offset
 
-            dist = np.linalg.norm(
-                obj_pose[:3,3] - T_world_ee[:3,3]
-            )
+        #     dist = np.linalg.norm(
+        #         obj_pose[:3,3] - T_world_ee[:3,3]
+        #     )
 
-            obj_pos = obj_pose[:3, 3]
-            ee_pos = T_world_ee[:3, 3]
+        #     obj_pos = obj_pose[:3, 3]
+        #     ee_pos = T_world_ee[:3, 3]
 
-            vec_ee_to_obj = obj_pos - ee_pos
-            vec_ee_to_obj /= np.linalg.norm(vec_ee_to_obj)
+        #     vec_ee_to_obj = obj_pos - ee_pos
+        #     vec_ee_to_obj /= np.linalg.norm(vec_ee_to_obj)
 
-            ee_z = T_world_ee[:3, :3][:, 2]
+        #     ee_z = T_world_ee[:3, :3][:, 2]
 
-            # print(i, "dot(+z, ee_to_obj) =", np.dot(ee_z, vec_ee_to_obj))
-            # print(i, dist)
+        #     # print(i, "dot(+z, ee_to_obj) =", np.dot(ee_z, vec_ee_to_obj))
+        #     # print(i, dist)
 
         nominal_grasp = None
         # for target in targets:
@@ -633,74 +721,93 @@ class MujocoEnv:
 
         # Perturb object until collision
 
-        x_vals = initial_tcr_intervals['x']
-        y_vals = initial_tcr_intervals['y']
-        yaw_vals = initial_tcr_intervals['yaw']
-        door_vals = initial_tcr_intervals.get("door", None)
+        # x_vals = initial_tcr_intervals['x']
+        # y_vals = initial_tcr_intervals['y']
+        # yaw_vals = initial_tcr_intervals['yaw']
+        # door_vals = initial_tcr_intervals.get("door", None)
+
+        current_intervals = {
+            dimension: list(values)
+            for dimension, values
+            in initial_tcr_intervals.items()
+        }
 
         # print(f"Inital TCR bounds: {initial_tcr_intervals}")
 
         cleared = False
+
         while not cleared:
-            reset = False
+            collision_found = False
 
-            current_intervals = {
-                "x": x_vals,
-                "y": y_vals,
-                "yaw": yaw_vals,
-            }
+            for sample in self.sample_tcr_intervals(
+                current_intervals
+            ):
+                x_value = sample.get("x", 0.0)
+                y_value = sample.get("y", 0.0)
+                yaw_value = sample.get("yaw", 0.0)
+                door_value = sample.get("door")
 
-            if door_vals is not None:
-                current_intervals["door"] = door_vals
+                object_perturbation = np.array(
+                    [
+                        x_value,
+                        y_value,
+                        0.0,
+                        yaw_value,
+                    ],
+                    dtype=float,
+                )
 
-            for sample in self.sample_tcr_intervals(current_intervals):
-                x_val = sample["x"]
-                y_val = sample["y"]
-                yaw_val = sample["yaw"]
-                door_val = sample.get("door", 0.0)
-
-                # print(f"door_val: {door_val}")
-
-                obj_perturbations = [x_val, y_val, 0.0, yaw_val]
-                testPose = (
-                    np.array(obj_perturbations) + np.array(nominal_object_pose)
+                test_pose = (
+                    np.asarray(
+                        nominal_object_pose,
+                        dtype=float,
+                    )
+                    + object_perturbation
                 ).tolist()
 
-                # self.move_object(testPose, tempModel, tempData)
                 if contact_face is None:
-                    self.move_object(testPose, tempModel, tempData)
+                    self.move_object(
+                        test_pose,
+                        tempModel,
+                        tempData,
+                    )
                 else:
                     self.move_object(
-                        [contact_face, testPose[0], testPose[1], testPose[2], testPose[3]],
-                        tempModel, tempData)
+                        [
+                            contact_face,
+                            test_pose[0],
+                            test_pose[1],
+                            test_pose[2],
+                            test_pose[3],
+                        ],
+                        tempModel,
+                        tempData,
+                    )
 
-                if "door" in sample:
-                    self.move_xml_joint("microwave_door_hinge", door_val, tempModel, tempData)
+                if door_value is not None:
+                    self.move_xml_joint(
+                        "microwave_door_hinge",
+                        door_value,
+                        tempModel,
+                        tempData,
+                    )
 
                 if tempRobot.viewer is not None:
                     tempRobot.viewer.sync()
-                    input("G?")
+                    input("Proceed?")
 
                 if tempRobot.in_contact():
-                    # print("Contact detected. Shrinking...")
-                    reset = True
+                    collision_found = True
                     break
-                # print(f"In contact: {tempRobot.in_contact()}")
-                # input()
-            if reset:
-                x_vals = (0.95 * np.array(x_vals)).tolist()
-                y_vals = (0.95 * np.array(y_vals)).tolist()
-                yaw_vals = (0.95 * np.array(yaw_vals)).tolist()
 
-                if door_vals is not None:
-                    door_vals = (0.95 * np.array(door_vals)).tolist()
-
-                # print("Resetting with:")
-                # print(f"x_vals: {x_vals}")
-                # print(f"y_vals: {y_vals}")
-                # print(f"yaw_vals: {yaw_vals}")
-                # if door_vals is not None:
-                #     print(f"door_vals: {door_vals}")
+            if collision_found:
+                current_intervals = {
+                    dimension: (
+                        0.95 * np.asarray(values)
+                    ).tolist()
+                    for dimension, values
+                    in current_intervals.items()
+                }
             else:
                 cleared = True
         
@@ -711,339 +818,34 @@ class MujocoEnv:
         # if door_vals is not None:
         #     print(f"door_vals: {door_vals}")
 
+        # tcr_intervals = {
+        #     'x': x_vals,
+        #     'y': y_vals,
+        #     'z': [nominal_object_pose[2]],
+        #     'yaw': yaw_vals
+        # }
+
+        # if isinstance(self, MicrowaveEnv):
+        #     tcr_intervals['door'] = door_vals
+
         tcr_intervals = {
-            'x': x_vals,
-            'y': y_vals,
-            'z': [nominal_object_pose[2]],
-            'yaw': yaw_vals
+            dimension: values
+            for dimension, values
+            in current_intervals.items()
         }
 
-        if isinstance(self, MicrowaveEnv):
-            tcr_intervals['door'] = door_vals
+        tcr_intervals["z"] = [
+            nominal_object_pose[2]
+        ]
+
+        if self.object_details["type"] == "cylinder":
+            tcr_intervals["yaw"] = [0.0]
 
         if tempRobot.viewer is not None:
             input()
             tempRobot.close()
-        print(f"PID {os.getpid()}: {tcr_intervals}")
+        # print(f"PID {os.getpid()}: {tcr_intervals}")
         return tcr_intervals
-
-    # def create_swept_volume(self, tcr_intervals, obj_size=None, sv_count=0, fixed=False):
-        
-    #     if obj_size is None:
-    #         obj_size = self.object_details['size']
-
-    #     def yaw_rot(theta):
-    #         c = np.cos(theta)
-    #         s = np.sin(theta)
-    #         return np.array([
-    #             [c, -s, 0.0],
-    #             [s,  c, 0.0],
-    #             [0.0, 0.0, 1.0],
-    #         ])
-
-    #     def make_T(R, p):
-    #         T = np.eye(4)
-    #         T[:3, :3] = R
-    #         T[:3, 3] = p
-    #         return T
-
-    #     def transform_points(points, T):
-    #         points_h = np.c_[points, np.ones(len(points))]
-    #         return (T @ points_h.T).T[:, :3]
-
-    #     def box_corners(lx, ly, lz):
-    #         hx, hy, hz = lx / 2.0, ly / 2.0, lz / 2.0
-    #         return np.array([
-    #             [-hx, -hy, -hz],
-    #             [-hx, -hy,  hz],
-    #             [-hx,  hy, -hz],
-    #             [-hx,  hy,  hz],
-    #             [ hx, -hy, -hz],
-    #             [ hx, -hy,  hz],
-    #             [ hx,  hy, -hz],
-    #             [ hx,  hy,  hz],
-    #         ], dtype=float)
-
-    #     # Construct swept volume mesh
-    #     if self.object_details['type'] == "box":
-            
-    #         if self.env_details['robot'] == "fetch":
-    #             mesh_prefix = "assets/temp"
-    #         else:
-    #             mesh_prefix = "temp"
-
-    #         lx, ly, lz = obj_size
-    #         hx, hy, hz = lx / 2, ly / 2, lz / 2
-
-    #         base_box_mesh = trimesh.creation.box(
-    #             extents=[lx, ly, lz]
-    #         )
-    #         box_meshes = []
-
-    #         yaw_values = np.asarray(
-    #             tcr_intervals["yaw"],
-    #             dtype=float,
-    #         )
-
-    #         yaw_samples = np.linspace(
-    #             yaw_values.min(),
-    #             yaw_values.max(),
-    #             100,
-    #         )
-
-    #         local_corners = np.array([
-    #             [-hx, -hy, -hz],
-    #             [-hx, -hy,  hz],
-    #             [-hx,  hy, -hz],
-    #             [-hx,  hy,  hz],
-    #             [ hx, -hy, -hz],
-    #             [ hx, -hy,  hz],
-    #             [ hx,  hy, -hz],
-    #             [ hx,  hy,  hz],
-    #         ], dtype=float)
-
-    #         all_points = []
-
-    #         for x, y, yaw in itertools.product(
-    #             tcr_intervals["x"],
-    #             tcr_intervals["y"],
-    #             # tcr_intervals["yaw"],
-    #             yaw_samples,
-    #         ):
-    #             R = yaw_rot(yaw)
-    #             t = np.array([x, y, 0.0], dtype=float)
-
-    #             world_corners = local_corners @ R.T + t
-    #             all_points.append(world_corners)
-
-    #             # Testing
-    #             T = make_T(
-    #                 R, np.array([x, y, 0.0], dtype=float)
-    #             )
-    #             box_mesh_i = base_box_mesh.copy()
-    #             box_mesh_i.apply_transform(T)
-    #             box_meshes.append(box_mesh_i.vertices.copy())
-            
-    #         box_meshes = np.vstack(box_meshes)
-
-    #         hull = trimesh.points.PointCloud(box_meshes).convex_hull
-                
-
-    #         # all_points = np.vstack(all_points)
-
-    #         mesh_file_name = f"sv_mesh_{sv_count}.stl"
-    #         out_path = Path(self.robot_dir) / "assets" / "temp" / f"{mesh_file_name}"
-    #         out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    #         # cloud = trimesh.points.PointCloud(all_points)
-    #         # hull = cloud.convex_hull
-    #         # hull.export(out_path)
-
-    #         # box_union.export(out_path)
-    #         hull.export(out_path)
-
-    #         # print("SV mesh extents:")
-    #         # print(hull.bounds)
-
-    #         # XML path should be relative to the included robot XML's assetdir/base,
-
-    #         body_mesh_file = f"{mesh_prefix}/microwave_body_sv.stl"
-    #         mesh_path_for_xml = f"{mesh_prefix}/sv_mesh_{sv_count}.stl"
-    #         mesh_name = f"swept_volume_mesh_{sv_count}"
-
-    #         # Construct mesh XML
-    #         rgba = [0.8, 0.8, 0.8, 1.0]
-    #         name = f"swept_volume_{sv_count}"
-    #         geom_name = f"sv_mesh_{sv_count}"
-
-    #         joint_xml = "" if fixed else f'<joint name="{name}_free" type="free"/>'
-
-    #         return f"""
-    #         <asset>
-    #             <mesh name="{mesh_name}" file="{mesh_path_for_xml}"/>
-    #         </asset>
-
-    #         <body name="{name}" pos="0 0 0">
-    #             {joint_xml}
-
-    #             <geom name="{geom_name}"
-    #                 type="mesh"
-    #                 mesh="{mesh_name}"
-    #                 rgba="{rgba[0]} {rgba[1]} {rgba[2]} {rgba[3]}"/>
-    #         </body>
-    #         """
-
-    #     elif self.object_details['type'] == "microwave":
-            
-    #         out_dir = Path(self.robot_dir) / "assets" / "temp"
-    #         out_dir.mkdir(parents=True, exist_ok=True)
-
-    #         if self.env_details['robot'] == "fetch":
-    #             mesh_prefix = "assets/temp"
-    #         else:
-    #             mesh_prefix = "temp"
-
-    #         name = "swept_volume_0"
-    #         joint_xml = "" if fixed else f'<joint name="{name}_free" type="free"/>'
-
-    #         rgba_body = [0.8, 0.8, 0.8, 1.0]
-    #         rgba_door = [0.2, 0.2, 0.25, 1.0]
-    #         rgba_handle = [0.8, 0.2, 0.2, 1.0]
-
-    #         asset_xml = []
-    #         geom_xml = []
-
-    #         # Body swept volume
-    #         body_lx, body_ly, body_lz = map(float, self.object_details["size"])
-    #         body_corners = box_corners(body_lx, body_ly, body_lz)
-
-    #         body_points = []
-
-    #         for x, y, yaw in itertools.product(
-    #             tcr_intervals["x"],
-    #             tcr_intervals["y"],
-    #             tcr_intervals["yaw"],
-    #         ):
-    #             R = yaw_rot(yaw)
-    #             T = make_T(R, np.array([x, y, 0.0], dtype=float))
-    #             body_points.append(transform_points(body_corners, T))
-
-    #         body_points = np.vstack(body_points)
-    #         body_hull = trimesh.points.PointCloud(body_points).convex_hull
-
-    #         body_mesh_name = "microwave_body_sv_mesh"
-    #         # body_mesh_file = "temp/microwave_body_sv.stl"
-    #         body_mesh_file = f"{mesh_prefix}/microwave_body_sv.stl"
-    #         body_hull.export(out_dir / "microwave_body_sv.stl")
-
-    #         asset_xml.append(f'<mesh name="{body_mesh_name}" file="{body_mesh_file}"/>')
-
-    #         geom_xml.append(f"""
-    #             <geom name="microwave_body_sv"
-    #                 type="mesh"
-    #                 mesh="{body_mesh_name}"
-    #                 rgba="{rgba_body[0]} {rgba_body[1]} {rgba_body[2]} {rgba_body[3]}"/>
-    #         """)
-
-    #         # Door and handle swept volumes
-    #         door_lx, door_ly, door_lz = map(float, self.object_details["door_size"])
-    #         handle_lx, handle_ly, handle_lz = map(float, self.object_details["handle_size"])
-
-    #         handle_pos_door = np.array(
-    #             self.object_details["handle_pos_door"],
-    #             dtype=float,
-    #         )
-
-    #         hinge_pos_body = np.array(
-    #             self.object_details["hinge_pos_body"],
-    #             dtype=float,
-    #         )
-
-    #         door_origin_closed_body = np.array(
-    #             self.object_details["door_origin_closed_body"],
-    #             dtype=float,
-    #         )
-
-    #         base_door_mesh = trimesh.creation.box(
-    #             extents=[door_lx, door_ly, door_lz]
-    #         )
-
-    #         base_handle_mesh = trimesh.creation.box(
-    #             extents=[handle_lx, handle_ly, handle_lz]
-    #         )
-    #         base_handle_mesh.apply_translation(handle_pos_door)
-
-    #         door_meshes = []
-    #         handle_meshes = []
-
-    #         for x, y, yaw, phi in itertools.product(
-    #             tcr_intervals["x"],
-    #             tcr_intervals["y"],
-    #             tcr_intervals["yaw"],
-    #             tcr_intervals["door"],
-    #         ):
-    #             R_world_body = yaw_rot(yaw)
-    #             T_world_body = make_T(R_world_body, np.array([x, y, 0.0], dtype=float))
-
-    #             R_phi = yaw_rot(phi)
-
-    #             T_body_hinge = make_T(np.eye(3), hinge_pos_body)
-    #             T_hinge_rot = make_T(R_phi, np.zeros(3))
-    #             T_hinge_door = make_T(
-    #                 np.eye(3),
-    #                 door_origin_closed_body - hinge_pos_body,
-    #             )
-
-    #             T_body_door = T_body_hinge @ T_hinge_rot @ T_hinge_door
-    #             T_world_door = T_world_body @ T_body_door
-
-    #             door_mesh_i = base_door_mesh.copy()
-    #             door_mesh_i.apply_transform(T_world_door)
-    #             door_meshes.append(door_mesh_i)
-
-    #             handle_mesh_i = base_handle_mesh.copy()
-    #             handle_mesh_i.apply_transform(T_world_door)
-    #             handle_meshes.append(handle_mesh_i)
-
-    #         try:
-    #             door_union = trimesh.boolean.union(door_meshes, engine="manifold")
-    #             handle_union = trimesh.boolean.union(handle_meshes, engine="manifold")
-    #         except Exception as e:
-    #             raise RuntimeError(
-    #                 "Boolean union failed. Try installing manifold3d with "
-    #                 "`pip install manifold3d`, or reduce/increase sampling. "
-    #                 f"Original error: {e}"
-    #             )
-
-    #         door_mesh_name = "microwave_door_sv_mesh"
-    #         door_mesh_file = "temp/microwave_door_sv_union.stl"
-    #         door_mesh_file = f"{mesh_prefix}/microwave_door_sv_union.stl"
-    #         door_union.export(out_dir / "microwave_door_sv_union.stl")
-
-    #         handle_mesh_name = "microwave_handle_sv_mesh"
-    #         # handle_mesh_file = "temp/microwave_handle_sv_union.stl"
-    #         handle_mesh_file = f"{mesh_prefix}/microwave_handle_sv_union.stl"
-    #         handle_union.export(out_dir / "microwave_handle_sv_union.stl")
-
-    #         asset_xml.append(f'<mesh name="{door_mesh_name}" file="{door_mesh_file}"/>')
-    #         asset_xml.append(f'<mesh name="{handle_mesh_name}" file="{handle_mesh_file}"/>')
-
-    #         hx, hy, hz = self.object_details["hinge_pos_body"]
-
-    #         geom_xml.append(f"""
-    #             <body name="sv_door_hinge_frame" pos="{hx} {hy} {hz}">
-    #                 <joint name="sv_door_hinge"
-    #                     type="hinge"
-    #                     axis="0 0 -1"
-    #                     limited="false"/>
-
-    #                 <geom name="microwave_door_sv"
-    #                     type="mesh"
-    #                     mesh="{door_mesh_name}"
-    #                     rgba="{rgba_door[0]} {rgba_door[1]} {rgba_door[2]} {rgba_door[3]}"/>
-
-    #                 <geom name="microwave_handle_sv"
-    #                     type="mesh"
-    #                     mesh="{handle_mesh_name}"
-    #                     rgba="{rgba_handle[0]} {rgba_handle[1]} {rgba_handle[2]} {rgba_handle[3]}"/>
-    #             </body>
-    #         """)
-
-    #         return f"""
-    #         <asset>
-    #             {''.join(asset_xml)}
-    #         </asset>
-
-    #         <body name="{name}" pos="0 0 0">
-    #             {joint_xml}
-
-    #             {''.join(geom_xml)}
-    #         </body>
-    #         """
-
-    #     else:
-    #         raise ValueError(f"Unsupported object type for swept volume: {self.object_details['type']}")
-
 
     def create_swept_volume(
         self,
@@ -1146,6 +948,26 @@ class MujocoEnv:
                     half_extents,
                     dtype=float,
                 ).copy(),
+            }
+
+        def make_cylinder_primitive(
+            position,
+            orientation,
+            radius,
+            length,
+        ):
+            return {
+                "type": "cylinder",
+                "position": np.asarray(
+                    position,
+                    dtype=float,
+                ).copy(),
+                "orientation": np.asarray(
+                    orientation,
+                    dtype=float,
+                ).reshape(3, 3).copy(),
+                "radius": float(radius),
+                "length": float(length),
             }
 
         # ================================================================
@@ -1787,6 +1609,217 @@ class MujocoEnv:
             </body>
             """
 
+        # ================================================================
+        # Cylinder swept volume
+        # ================================================================
+        elif self.object_details["type"] == "cylinder":
+
+            if self.env_details["robot"] == "fetch":
+                mesh_prefix = "assets/temp"
+            else:
+                mesh_prefix = "temp"
+
+            radius, height = map(float, obj_size)
+
+            x_values = np.asarray(
+                tcr_intervals["x"],
+                dtype=float,
+            )
+
+            y_values = np.asarray(
+                tcr_intervals["y"],
+                dtype=float,
+            )
+
+            if x_values.size == 0 or y_values.size == 0:
+                raise ValueError(
+                    "Cylinder swept volume requires nonempty "
+                    "x and y intervals."
+                )
+
+            x_min = float(x_values.min())
+            x_max = float(x_values.max())
+            y_min = float(y_values.min())
+            y_max = float(y_values.max())
+
+            x_center = (x_min + x_max) / 2.0
+            y_center = (y_min + y_max) / 2.0
+
+            x_span = x_max - x_min
+            y_span = y_max - y_min
+
+            identity_rotation = np.eye(3, dtype=float)
+
+            cylinder_primitives = []
+
+            # The swept cylinder is a rounded rectangular prism.
+            # Represent its center using two overlapping cuboids.
+            if x_span > 1e-12:
+                cylinder_primitives.append(
+                    make_cuboid_primitive(
+                        position=[
+                            x_center,
+                            y_center,
+                            0.0,
+                        ],
+                        orientation=identity_rotation,
+                        half_extents=[
+                            x_span / 2.0,
+                            y_span / 2.0 + radius,
+                            height / 2.0,
+                        ],
+                    )
+                )
+
+            if y_span > 1e-12:
+                cylinder_primitives.append(
+                    make_cuboid_primitive(
+                        position=[
+                            x_center,
+                            y_center,
+                            0.0,
+                        ],
+                        orientation=identity_rotation,
+                        half_extents=[
+                            x_span / 2.0 + radius,
+                            y_span / 2.0,
+                            height / 2.0,
+                        ],
+                    )
+                )
+
+            # Add cylinders at the corners of the x/y sweep.
+            corner_positions = {
+                (x_min, y_min),
+                (x_min, y_max),
+                (x_max, y_min),
+                (x_max, y_max),
+            }
+
+            for x, y in corner_positions:
+                cylinder_primitives.append(
+                    make_cylinder_primitive(
+                        position=[x, y, 0.0],
+                        orientation=identity_rotation,
+                        radius=radius,
+                        length=height,
+                    )
+                )
+
+            # Construct the STL from cylinders placed at the corners.
+            # Their convex hull is the rounded rectangular sweep.
+            base_cylinder_mesh = trimesh.creation.cylinder(
+                radius=radius,
+                height=height,
+                sections=64,
+            )
+
+            cylinder_vertices = []
+
+            for x, y in corner_positions:
+                cylinder_mesh = base_cylinder_mesh.copy()
+
+                cylinder_mesh.apply_translation(
+                    [x, y, 0.0]
+                )
+
+                cylinder_vertices.append(
+                    cylinder_mesh.vertices.copy()
+                )
+
+            if not cylinder_vertices:
+                raise ValueError(
+                    "No cylinders were generated for the "
+                    "cylinder swept volume."
+                )
+
+            cylinder_vertices = np.vstack(
+                cylinder_vertices
+            )
+
+            hull = trimesh.points.PointCloud(
+                cylinder_vertices
+            ).convex_hull
+
+            mesh_file_name = f"sv_mesh_{sv_count}.stl"
+
+            # out_path = (
+            #     Path(self.robot_dir)
+            #     / "assets"
+            #     / "temp"
+            #     / mesh_file_name
+            # )
+
+            if self.env_details["robot"] == "fetch":
+                out_dir = (
+                    Path(self.robot_dir)
+                    / "assets"
+                    / "temp"
+                )
+            else:
+                out_dir = (
+                    Path(self.robot_dir)
+                    / "temp"
+                )
+
+            out_path = out_dir / mesh_file_name
+
+            out_path.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+
+            hull.export(out_path)
+
+            mesh_path_for_xml = (
+                f"{mesh_prefix}/{mesh_file_name}"
+            )
+
+            mesh_name = (
+                f"swept_volume_mesh_{sv_count}"
+            )
+
+            body_name = (
+                f"swept_volume_{sv_count}"
+            )
+
+            geom_name = (
+                f"sv_mesh_{sv_count}"
+            )
+
+            rgba = [0.8, 0.8, 0.8, 1.0]
+
+            joint_xml = (
+                ""
+                if fixed
+                else (
+                    f'<joint name="{body_name}_free" '
+                    f'type="free"/>'
+                )
+            )
+
+            self.swept_volume_primitives[
+                geom_name
+            ] = cylinder_primitives
+
+            return f"""
+            <asset>
+                <mesh
+                    name="{mesh_name}"
+                    file="{mesh_path_for_xml}"/>
+            </asset>
+
+            <body name="{body_name}" pos="0 0 0">
+                {joint_xml}
+
+                <geom
+                    name="{geom_name}"
+                    type="mesh"
+                    mesh="{mesh_name}"
+                    rgba="{' '.join(map(str, rgba))}"/>
+            </body>
+            """
+
         else:
             raise ValueError(
                 "Unsupported object type for swept-volume generation: "
@@ -2074,15 +2107,43 @@ class MujocoEnv:
         T[:3, 3] = pos
         return T
 
-    def object_xml(self, object_dims, object_pose, fixed=False, temp=False, name=None):
-        
-        if self.object_details['type'] == "microwave":
-            return self.microwave_object_xml(object_dims, object_pose, fixed, temp)
-        elif self.object_details['type'] == "box":
-            return self.cube_object_xml(object_dims, object_pose, fixed, temp, name=name)
-        else:
-            raise ValueError(f"Unsupported object type: {self.object_details['type']}")
+    def object_xml(
+        self,
+        object_dims,
+        object_pose,
+        fixed=False,
+        temp=False,
+        name=None,
+    ):
+        if self.object_details["type"] == "microwave":
+            return self.microwave_object_xml(
+                object_dims,
+                object_pose,
+                fixed,
+                temp,
+            )
 
+        if self.object_details["type"] == "box":
+            return self.cube_object_xml(
+                object_dims,
+                object_pose,
+                fixed,
+                temp,
+                name=name,
+            )
+
+        if self.object_details["type"] == "cylinder":
+            return self.cylinder_object_xml(
+                object_dims,
+                object_pose,
+                fixed,
+                temp,
+                name=name,
+            )
+
+        raise ValueError(
+            f"Unsupported object type: {self.object_details['type']}"
+        )
         
     def microwave_object_xml(self, object_dims, object_pose, fixed=False, temp=False):
         """Create articulated hollow microwave XML string.
@@ -2266,25 +2327,38 @@ class MujocoEnv:
             self.env_details['collision_geoms'].append(f"{name}_geom")
         return obj_xml
 
-    def cylinder_object_xml(self, object_dims, object_pose, fixed=False):
-        """Create cylinder object xml string"""
+    def cylinder_object_xml(
+        self,
+        object_dims,
+        object_pose,
+        fixed=False,
+        temp=False,
+        name=None,
+    ):
+        """Create a cylinder-object XML fragment."""
 
-        rgba = [0.8, 0.2, 0.2, 1]
-        name = "cube_object"
+        rgba = [0.8, 0.2, 0.2, 1.0]
 
-        r, h = object_dims
+        if name is None:
+            name = "cube_object"
 
+        radius, height = object_dims
         object_x, object_y, object_z, object_yaw = object_pose
 
-        half = 0.5 * float(object_yaw)
-        qw = np.cos(half)
+        half_yaw = 0.5 * float(object_yaw)
+
+        qw = np.cos(half_yaw)
         qx = 0.0
         qy = 0.0
-        qz = np.sin(half)
+        qz = np.sin(half_yaw)
 
-        joint_xml = "" if fixed else f'<joint name="{name}_free" type="free"/>'
+        joint_xml = (
+            ""
+            if fixed
+            else f'<joint name="{name}_free" type="free"/>'
+        )
 
-        obj_xml = f"""
+        object_xml = f"""
         <body name="{name}"
             pos="{object_x} {object_y} {object_z}"
             quat="{qw} {qx} {qy} {qz}">
@@ -2293,57 +2367,140 @@ class MujocoEnv:
             <geom name="{name}_geom"
                 type="cylinder"
                 pos="0 0 0"
-                size="{r} {h/2}"
+                size="{radius} {height / 2.0}"
                 rgba="{rgba[0]} {rgba[1]} {rgba[2]} {rgba[3]}"/>
         </body>
         """
 
-        self.collision_geoms.append(f"{name}_geom")
-        return obj_xml
+        if not temp:
+            self.env_details["collision_geoms"].append(
+                f"{name}_geom"
+            )
+
+        return object_xml
     
     def move_object(self, object_pose, model=None, data=None):
 
-        if self.object_details['type'] == "box":
+        if self.object_details["type"] == "box":
             self.move_cube_object(object_pose, model, data)
-        elif self.object_details['type'] == "microwave":
-            self.move_xml_object("microwave_object", object_pose, model, data)
-        else:
-            return ValueError(f"Unsupported object type: {self.object_details['type']}")
 
-    def move_xml_object(self, object_name, object_pose, model, data):
-        """
-        Move cube_object to (x, y, z, yaw) by writing into its free joint qpos.
-        object_pose: iterable length-4: (x, y, z, yaw) in radians
-        """
-        if object_name == "microwave_object":
-            x, y, z, yaw = object_pose 
+        elif self.object_details["type"] == "cylinder":
+            self.move_xml_object(
+                "cube_object",
+                object_pose,
+                model,
+                data,
+            )
 
-            if model is None and data is None:
-                model = self.model
-                data = self.data
-
-            # jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "cube_object_free")
-            # qadr = self.model.jnt_qposadr[jid]
-            # vadr = self.model.jnt_dofadr[jid]
-
-            jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, f"{object_name}_free")
-            qadr = model.jnt_qposadr[jid]
-            vadr = model.jnt_dofadr[jid]
-
-            half = 0.5 * float(yaw)
-            qw = np.cos(half)
-            qx = 0.0
-            qy = 0.0
-            qz = np.sin(half)
-
-            # free joint qpos layout: [x y z qw qx qy qz]
-            data.qpos[qadr:qadr+7] = [x, y, z, qw, qx, qy, qz]
-            data.qvel[vadr:vadr+6] = 0.0
-
-            mujoco.mj_forward(model, data)
+        elif self.object_details["type"] == "microwave":
+            self.move_xml_object(
+                "microwave_object",
+                object_pose,
+                model,
+                data,
+            )
 
         else:
-            raise ValueError(f"Unsupported XML object: {object_name}")
+            raise ValueError(
+                f"Unsupported object type: {self.object_details['type']}"
+            )
+        
+    # def move_xml_object(self, object_name, object_pose, model, data):
+    #     """
+    #     Move cube_object to (x, y, z, yaw) by writing into its free joint qpos.
+    #     object_pose: iterable length-4: (x, y, z, yaw) in radians
+    #     """
+    #     if object_name == "microwave_object":
+    #         x, y, z, yaw = object_pose 
+
+    #         if model is None and data is None:
+    #             model = self.model
+    #             data = self.data
+
+    #         # jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "cube_object_free")
+    #         # qadr = self.model.jnt_qposadr[jid]
+    #         # vadr = self.model.jnt_dofadr[jid]
+
+    #         jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, f"{object_name}_free")
+    #         qadr = model.jnt_qposadr[jid]
+    #         vadr = model.jnt_dofadr[jid]
+
+    #         half = 0.5 * float(yaw)
+    #         qw = np.cos(half)
+    #         qx = 0.0
+    #         qy = 0.0
+    #         qz = np.sin(half)
+
+    #         # free joint qpos layout: [x y z qw qx qy qz]
+    #         data.qpos[qadr:qadr+7] = [x, y, z, qw, qx, qy, qz]
+    #         data.qvel[vadr:vadr+6] = 0.0
+
+    #         mujoco.mj_forward(model, data)
+
+    #     else:
+    #         raise ValueError(f"Unsupported XML object: {object_name}")
+
+    def move_xml_object(
+        self,
+        object_name,
+        object_pose,
+        model=None,
+        data=None,
+    ):
+        """
+        Move a free-joint XML object to an x, y, z, yaw pose.
+
+        The object's free joint must be named:
+            <object_name>_free
+        """
+
+        if model is None:
+            model = self.model
+
+        if data is None:
+            data = self.data
+
+        x, y, z, yaw = object_pose
+
+        joint_name = f"{object_name}_free"
+
+        joint_id = mujoco.mj_name2id(
+            model,
+            mujoco.mjtObj.mjOBJ_JOINT,
+            joint_name,
+        )
+
+        if joint_id == -1:
+            raise ValueError(
+                f"Could not find free joint: {joint_name}"
+            )
+
+        qpos_address = model.jnt_qposadr[joint_id]
+        qvel_address = model.jnt_dofadr[joint_id]
+
+        half_yaw = 0.5 * float(yaw)
+
+        quaternion_wxyz = [
+            np.cos(half_yaw),
+            0.0,
+            0.0,
+            np.sin(half_yaw),
+        ]
+
+        # Free-joint qpos:
+        # [x, y, z, qw, qx, qy, qz]
+        data.qpos[qpos_address:qpos_address + 7] = [
+            x,
+            y,
+            z,
+            *quaternion_wxyz,
+        ]
+
+        # Free-joint velocity:
+        # [vx, vy, vz, wx, wy, wz]
+        data.qvel[qvel_address:qvel_address + 6] = 0.0
+
+        mujoco.mj_forward(model, data)
         
     def move_xml_joint(self, joint_name, joint_value, model=None, data=None):
         """
@@ -3516,107 +3673,153 @@ class ShelfEnv(MujocoEnv):
         return self.task_set
 
 
+
 class RealEnv(MujocoEnv):
     """Real environment"""
 
-    def __init__(self, robot, no_sv=False):
-        """Initialize real environment"""
-        super().__init__(robot, custom_base="lab_scene.xml")
+    def __init__(self, robot, using_swept_volume=True):
+        """Initialize the real lab environment."""
+
         if robot != "ur10":
             raise NotImplementedError("RealEnv only supports UR10")
 
-        # Initialize object dimensions
-        self.object_details = {
-            "size": [0.045, 0.08],  # [r, h]
-            "type": "cylinder",
-            "yaw": 0,
+        super().__init__(robot, custom_base="lab_scene.xml")
+
+        # --------------------------------------------------------------
+        # Object details
+        # --------------------------------------------------------------
+
+        object_type = "cylinder"
+        object_size = [0.045, 0.08]  # [radius, height]
+
+        real_intervals = [
+            [-0.35, 0.07],
+            [-1.02, -0.70],
+        ]
+
+        # object_variation = {
+        #     "x": [real_intervals[0]],
+        #     "y": [real_intervals[1]],
+        #     "z": [[object_size[1] / 2.0, object_size[1] / 2.0]],
+        # }
+
+        object_variation = {
+            "x": [real_intervals[0]],
+            "y": [real_intervals[1]],
+            "z": [
+                [
+                    object_size[1] / 2.0,
+                    object_size[1] / 2.0,
+                ]
+            ],
+            "yaw": [[0.0, 0.0]],
         }
-        # print(self.object_details['size'])
-        # object_path = self.select_object("mug")
-        # object_path = self.select_object("g_cups")
 
-        self.robot_pos = [0, 0, 0]
-        self.robot_quat = [1, 0, 0, 0]
-        self.robot_quat = [0.70710678, 0.0, 0.0, 0.70710678]
-        self.robot_quat = [0.0, 0.0, 0.0, 1.0]
-        # self.robot_quat = [-0.70710678, 0.0, 0.0, 0.70710678]
+        super().populate_object_details(
+            object_type,
+            object_size,
+            object_variation,
+        )
 
-        base_pos = [0, 0, 0]
-        base_dim = [0, 0, 0]
+        # --------------------------------------------------------------
+        # Environment details
+        # --------------------------------------------------------------
 
-        self.object_yaw = 0 * np.pi  # -yaw to +yaw
-        self.object_inner_rad = 0.3
-        self.object_outer_rad = 1.0
+        robot_pos = [0, 0, 0]
+        robot_quat = [0, 0, 0, 1]  # WXYZ
+
+        outer_rad = 1.0
+        inner_rad = 0.3
+
+        # RealEnv currently generates its scene programmatically, so it
+        # does not need a scene YAML.
+        super().populate_env_details(
+            scene_yaml=None,
+            robot_name=robot,
+            env_name="real",
+            robot_pos=robot_pos,
+            robot_quat=robot_quat,
+            outer_rad=outer_rad,
+            inner_rad=inner_rad,
+        )
+
+        # RealEnv has manually specified placement intervals.
+        self.env_details["intervals"] = real_intervals
+
+        # --------------------------------------------------------------
+        # Grasp details
+        # --------------------------------------------------------------
+
+        super().populate_grasp_details(
+            alpha=0.5,
+            grasp_type="top",
+        )
+
+        # --------------------------------------------------------------
+        # Temporary compatibility with the old UR10 TSR implementation
+        # --------------------------------------------------------------
+
+        self.robot_pos = self.env_details["robot_pos"]
+        self.robot_quat = self.env_details["robot_quat"]
+
+        self.object_inner_rad = self.env_details["inner_rad"]
+        self.object_outer_rad = self.env_details["outer_rad"]
+        self.object_yaw = 0.0
+
+        self.yaw_buffer = self.grasp_details["yaw_buffer"]
+        self.alpha = self.grasp_details["alpha"]
 
         self.object_details["dist"] = [
             self.object_outer_rad,
             self.object_outer_rad,
-            0,
+            0.0,
             self.object_yaw,
         ]
 
         self.object_details["position"] = [
             self.robot_pos[0],
             self.robot_pos[1],
-            base_pos[2]
-            + (base_dim[2] / 2)
-            + self.object_details["size"][1] / 2,
+            object_size[1] / 2.0,
         ]
 
-        # box_intervals = super().find_problem_intervals(base_name="base", wall_clearance=box_thickness)
-
-        # table intervals
-        real_intervals = [[-0.35, 0.07], [-1.02, -0.70]]
-        # real_intervals = [
-        #     [-1, 1],
-        #     [-1, 1]
-        # ]
+        # Keep this legacy dictionary until its consumers are migrated
+        # to object_details and env_details.
         self.problem = {
-            "name": "box",
+            "name": "real",
             "intervals": real_intervals,
-            "robot": f"{robot}",
+            "robot": robot,
         }
 
-        # Find TSR parameters
-        sv_config = super().initialize_TSR_parameters(
-            robot, grasp_strategy="top"
-        )
+        # sv_config = super().initialize_TSR_parameters(
+        #     robot,
+        #     grasp_strategy="top",
+        # )
 
-        # print(self.object_details['size'])
-        if no_sv is True:
-            # pass
-            # print(self.object_details['size'])
-            # print(sv_config)
-            sv_xml = super().cylinder_object_xml(
-                self.object_details["size"], [1, 1, 0, 0]
+        # if using_swept_volume:
+        #     object_xml = super().cube_swept_volume_xml(
+        #         self.object_details["size"],
+        #         sv_config,
+        #         cyl=True,
+        #     )
+        # else:
+        #     object_xml = super().cylinder_object_xml(
+        #         self.object_details["size"],
+        #         [1, 1, 0, 0],
+        #     )
+
+        if using_swept_volume:
+            tcr_intervals = super().construct_tcr()
+
+            object_xml = super().create_swept_volume(
+                tcr_intervals,
             )
         else:
-            sv_xml = super().cube_swept_volume_xml(
-                self.object_details["size"], sv_config, cyl=True
+            object_xml = super().cylinder_object_xml(
+                self.object_details["size"],
+                [0, 0, 0, 0],
             )
-        # sv_xml = self.mjcf_file_to_fragment(object_path)
-        xmls_to_add = [sv_xml]
 
-        # Extra objects
-        # apple_xml = self.mjcf_file_to_fragment("assets/ycb/apple.xml")
-        # sugar_box_xml = self.mjcf_file_to_fragment("assets/ycb/sugar_box.xml")
-        # a_cups_xml = self.mjcf_file_to_fragment("assets/ycb/a_cups.xml")
-
-        # xmls_to_add.append(apple_xml)
-        # xmls_to_add.append(sugar_box_xml)
-        # xmls_to_add.append(a_cups_xml)
-
-        # b_cups_xml = self.mjcf_file_to_fragment("assets/ycb/b_cups.xml")
-        # xmls_to_add.append(b_cups_xml)
-
-        # c_cups_xml = self.mjcf_file_to_fragment("assets/ycb/c_cups.xml")
-        # xmls_to_add.append(c_cups_xml)
-
-        # d_cups_xml = self.mjcf_file_to_fragment("assets/ycb/d_cups.xml")
-        # xmls_to_add.append(d_cups_xml)
-
-        # g_cups_xml = self.mjcf_file_to_fragment("assets/ycb/g_cups.xml")
-        # xmls_to_add.append(g_cups_xml)
+        xmls_to_add = [object_xml]
 
         wall1_dims = (0.24, 0.45, 0.29)
         wall_inflation = 0.07  # inflating by object's size (for return path)
@@ -3772,10 +3975,264 @@ class RealEnv(MujocoEnv):
         self.xmls_to_add = xmls_to_add
         self.model, self.data = super().build_model(free_xml_path, xmls_to_add)
 
-        # self.randomize_object_positions(["mug", "apple", "sugar_box", "a_cups"], [0.05, 0.05, 0.1, 0.1])
-        # self.model, self.data = build_model_with_fragments(free_xml_path, xmls_to_add)
 
-    # def cup_object_xml(self, fixed=False):
+    # def __init__(self, robot, no_sv=False):
+    #     """Initialize real environment"""
+    #     super().__init__(robot, custom_base="lab_scene.xml")
+    #     if robot != "ur10":
+    #         raise NotImplementedError("RealEnv only supports UR10")
+
+    #     # Initialize object dimensions
+    #     self.object_details = {
+    #         "size": [0.045, 0.08],  # [r, h]
+    #         "type": "cylinder",
+    #         "yaw": 0,
+    #     }
+    #     # print(self.object_details['size'])
+    #     # object_path = self.select_object("mug")
+    #     # object_path = self.select_object("g_cups")
+
+    #     self.robot_pos = [0, 0, 0]
+    #     self.robot_quat = [1, 0, 0, 0]
+    #     self.robot_quat = [0.70710678, 0.0, 0.0, 0.70710678]
+    #     self.robot_quat = [0.0, 0.0, 0.0, 1.0]
+    #     # self.robot_quat = [-0.70710678, 0.0, 0.0, 0.70710678]
+
+    #     base_pos = [0, 0, 0]
+    #     base_dim = [0, 0, 0]
+
+    #     self.object_yaw = 0 * np.pi  # -yaw to +yaw
+    #     self.object_inner_rad = 0.3
+    #     self.object_outer_rad = 1.0
+
+    #     self.object_details["dist"] = [
+    #         self.object_outer_rad,
+    #         self.object_outer_rad,
+    #         0,
+    #         self.object_yaw,
+    #     ]
+
+    #     self.object_details["position"] = [
+    #         self.robot_pos[0],
+    #         self.robot_pos[1],
+    #         base_pos[2]
+    #         + (base_dim[2] / 2)
+    #         + self.object_details["size"][1] / 2,
+    #     ]
+
+    #     # box_intervals = super().find_problem_intervals(base_name="base", wall_clearance=box_thickness)
+
+    #     # table intervals
+    #     real_intervals = [[-0.35, 0.07], [-1.02, -0.70]]
+    #     # real_intervals = [
+    #     #     [-1, 1],
+    #     #     [-1, 1]
+    #     # ]
+    #     self.problem = {
+    #         "name": "box",
+    #         "intervals": real_intervals,
+    #         "robot": f"{robot}",
+    #     }
+
+    #     # Find TSR parameters
+    #     sv_config = super().initialize_TSR_parameters(
+    #         robot, grasp_strategy="top"
+    #     )
+
+    #     # print(self.object_details['size'])
+    #     if no_sv is True:
+    #         # pass
+    #         # print(self.object_details['size'])
+    #         # print(sv_config)
+    #         sv_xml = super().cylinder_object_xml(
+    #             self.object_details["size"], [1, 1, 0, 0]
+    #         )
+    #     else:
+    #         sv_xml = super().cube_swept_volume_xml(
+    #             self.object_details["size"], sv_config, cyl=True
+    #         )
+    #     # sv_xml = self.mjcf_file_to_fragment(object_path)
+    #     xmls_to_add = [sv_xml]
+
+    #     # Extra objects
+    #     # apple_xml = self.mjcf_file_to_fragment("assets/ycb/apple.xml")
+    #     # sugar_box_xml = self.mjcf_file_to_fragment("assets/ycb/sugar_box.xml")
+    #     # a_cups_xml = self.mjcf_file_to_fragment("assets/ycb/a_cups.xml")
+
+    #     # xmls_to_add.append(apple_xml)
+    #     # xmls_to_add.append(sugar_box_xml)
+    #     # xmls_to_add.append(a_cups_xml)
+
+    #     # b_cups_xml = self.mjcf_file_to_fragment("assets/ycb/b_cups.xml")
+    #     # xmls_to_add.append(b_cups_xml)
+
+    #     # c_cups_xml = self.mjcf_file_to_fragment("assets/ycb/c_cups.xml")
+    #     # xmls_to_add.append(c_cups_xml)
+
+    #     # d_cups_xml = self.mjcf_file_to_fragment("assets/ycb/d_cups.xml")
+    #     # xmls_to_add.append(d_cups_xml)
+
+    #     # g_cups_xml = self.mjcf_file_to_fragment("assets/ycb/g_cups.xml")
+    #     # xmls_to_add.append(g_cups_xml)
+
+    #     wall1_dims = (0.24, 0.45, 0.29)
+    #     wall_inflation = 0.07  # inflating by object's size (for return path)
+    #     wall1_dims = np.array(wall1_dims) * 1.05
+    #     wall1_dims = wall1_dims + wall_inflation / 2
+
+    #     # build wall 1
+    #     wall_1_xml = self.build_primitive_body_xml(
+    #         body_name="wall1",
+    #         prim_type="box",
+    #         pos=(0.27, -0.82, 0.145),
+    #         dims=wall1_dims.tolist(),
+    #         quat_xyzw=(0, 0, 0, 1),
+    #         make_free=False,
+    #     )
+    #     xmls_to_add.append(wall_1_xml)
+
+    #     # build wall 2
+    #     wall_2_xml = self.build_primitive_body_xml(
+    #         body_name="wall2",
+    #         prim_type="box",
+    #         pos=(-0.07, -0.45, 0.135),
+    #         dims=(0.48, 0.34, 0.27),
+    #         quat_xyzw=(0, 0, 0, 1),
+    #         make_free=False,
+    #     )
+    #     xmls_to_add.append(wall_2_xml)
+
+    #     # build block 1
+    #     block_1_xml = self.build_primitive_body_xml(
+    #         body_name="block1",
+    #         prim_type="box",
+    #         pos=(0.205, -0.51, 0.1),
+    #         dims=(0.09, 0.09, 0.2),
+    #         quat_xyzw=(0, 0, 0, 1),
+    #         make_free=False,
+    #     )
+    #     xmls_to_add.append(block_1_xml)
+
+    #     # build packing
+    #     packing_1_xml = self.build_primitive_body_xml(
+    #         body_name="packing1",
+    #         prim_type="box",
+    #         pos=(0.54, -0.80, 0.01),
+    #         dims=(0.21, 0.36, 0.02),
+    #         quat_xyzw=(0, 0, 0, 1),
+    #         make_free=False,
+    #     )
+    #     xmls_to_add.append(packing_1_xml)
+
+    #     # --- parameters ---
+    #     cx, cy, z_floor = 0.54, -0.80, 0.01
+    #     Lx, Ly, t_floor = 0.21, 0.36, 0.02
+
+    #     t_wall = 0.02
+    #     h_wall = 0.13  # <-- change this to how tall you want the hollow box
+    #     h_wall = 0.10 + wall_inflation
+
+    #     z_top = z_floor + t_floor / 2.0
+    #     z_wall = z_top + h_wall / 2.0
+
+    #     x_off = (Lx / 2.0) - (t_wall / 2.0)
+    #     y_off = (Ly / 2.0) - (t_wall / 2.0)
+
+    #     # Left wall (thin in x, spans y, tall in z)
+    #     packing_2_xml = self.build_primitive_body_xml(
+    #         body_name="packing2_left",
+    #         prim_type="box",
+    #         pos=(cx - x_off, cy, z_wall),
+    #         dims=(t_wall, Ly, h_wall),
+    #         quat_xyzw=(0, 0, 0, 1),
+    #         make_free=False,
+    #     )
+
+    #     # Right wall
+    #     packing_3_xml = self.build_primitive_body_xml(
+    #         body_name="packing3_right",
+    #         prim_type="box",
+    #         pos=(cx + x_off, cy, z_wall),
+    #         dims=(t_wall, Ly, h_wall),
+    #         quat_xyzw=(0, 0, 0, 1),
+    #         make_free=False,
+    #     )
+
+    #     # Bottom wall (thin in y, spans x, tall in z)
+    #     packing_4_xml = self.build_primitive_body_xml(
+    #         body_name="packing4_bottom",
+    #         prim_type="box",
+    #         pos=(cx, cy - y_off, z_wall),
+    #         dims=(Lx, t_wall, h_wall),
+    #         quat_xyzw=(0, 0, 0, 1),
+    #         make_free=False,
+    #     )
+
+    #     # Top wall
+    #     packing_5_xml = self.build_primitive_body_xml(
+    #         body_name="packing5_top",
+    #         prim_type="box",
+    #         pos=(cx, cy + y_off, z_wall),
+    #         dims=(Lx, t_wall, h_wall),
+    #         quat_xyzw=(0, 0, 0, 1),
+    #         make_free=False,
+    #     )
+
+    #     xmls_to_add.append(packing_2_xml)
+    #     xmls_to_add.append(packing_3_xml)
+    #     xmls_to_add.append(packing_4_xml)
+    #     xmls_to_add.append(packing_5_xml)
+
+    #     # upper boundary
+    #     upper_boundary_xml = self.build_primitive_body_xml(
+    #         body_name="ub1",
+    #         prim_type="box",
+    #         pos=(0, -0.50, 1.02),
+    #         dims=(1.5, 1.5, 0.02),
+    #         quat_xyzw=(0, 0, 0, 1),
+    #         make_free=False,
+    #     )
+    #     xmls_to_add.append(upper_boundary_xml)
+
+    #     # upper boundary
+    #     back_boundary_xml = self.build_primitive_body_xml(
+    #         body_name="bb1",
+    #         prim_type="box",
+    #         pos=(0, 0.40, 0.8),
+    #         dims=(2, 0.02, 1.60),
+    #         quat_xyzw=(0, 0, 0, 1),
+    #         make_free=False,
+    #     )
+    #     xmls_to_add.append(back_boundary_xml)
+
+    #     left_boundary_xml = self.build_primitive_body_xml(
+    #         body_name="lb1",
+    #         prim_type="box",
+    #         pos=(-0.82, -0.50, 0.8),
+    #         dims=(0.02, 2, 1.60),
+    #         quat_xyzw=(0, 0, 0, 1),
+    #         make_free=False,
+    #     )
+    #     xmls_to_add.append(left_boundary_xml)
+
+    #     right_boundary_xml = self.build_primitive_body_xml(
+    #         body_name="rb1",
+    #         prim_type="box",
+    #         pos=(0.82, -0.50, 0.8),
+    #         dims=(0.02, 2, 1.60),
+    #         quat_xyzw=(0, 0, 0, 1),
+    #         make_free=False,
+    #     )
+    #     xmls_to_add.append(right_boundary_xml)
+
+    #     free_xml_path = f"{self.robot_dir}/real_scene.xml"
+    #     self.xmls_to_add = xmls_to_add
+    #     self.model, self.data = super().build_model(free_xml_path, xmls_to_add)
+
+    #     # self.randomize_object_positions(["mug", "apple", "sugar_box", "a_cups"], [0.05, 0.05, 0.1, 0.1])
+    #     # self.model, self.data = build_model_with_fragments(free_xml_path, xmls_to_add)
+
+    # # def cup_object_xml(self, fixed=False):
 
     def build_primitive_body_xml(
         self,

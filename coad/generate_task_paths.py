@@ -274,7 +274,7 @@ def solve_individual(
                 path, total_time, planning_time = planner.plan(
                     start=start,
                     goal=ik_goal,
-                    timeout=3.0,
+                    timeout=20.0,
                     num_waypoints=200,
                     benchmark=True,
                 )
@@ -284,7 +284,7 @@ def solve_individual(
                 if robot.viewer is not None:
                     robot.set_joint_qpos(ik_goal)
                     robot.viewer.sync()
-                    input()
+                    # input()
 
                 plan_success[i] = False
                 task_paths[key] = None
