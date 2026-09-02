@@ -4705,8 +4705,8 @@ class AllStableEnv(MujocoEnv):
 
 if __name__ == "__main__":
     # Load environment and generate task set
-    robot_chosen = "G1"
-    environment = "free"
+    robot_chosen = "ur10"
+    environment = "real"
     ik = "neighbor"
     planner = "RRTConnect"
 
@@ -4716,12 +4716,12 @@ if __name__ == "__main__":
         env = CageEnv(robot_chosen, no_sv=True)
     elif environment == "shelf":
         env = ShelfEnv(robot_chosen, no_sv=True)
-    elif environment == "real":
-        env = RealEnv(robot_chosen, no_sv=True)
     elif environment == "largeobj":
         env = LargeObjectEnv(robot_chosen, no_sv=True)
     elif environment == "microwave":
         env = MicrowaveEnv(robot_chosen, using_swept_volume=True)
+    elif environment == "real":
+        env = RealEnv(robot_chosen, using_swept_volume=True)
     else:
         env = FreeEnv(robot_chosen, using_swept_volume=True)
 

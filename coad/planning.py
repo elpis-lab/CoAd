@@ -120,8 +120,23 @@ class VAMPPlanner:
             )
             size = self.model.geom_size[geom_id].copy()
 
+            geom_name = mujoco.mj_id2name(
+                self.model,
+                mujoco.mjtObj.mjOBJ_GEOM,
+                geom_id,
+            )
+
+            # print(
+            #     f"VAMP geom {geom_id}: "
+            #     f"name={geom_name}, type={geom_type}",
+            #     flush=True,
+            # )
+
+            if geom_name == "cube_object_geom":
+                continue
+
             if geom_type == mujoco.mjtGeom.mjGEOM_PLANE:
-                # continue
+                continue
                 floor_half_height = 0.05
                 floor_clearance = 0.1 if self.robot_name == "fetch" else 0.0
 
@@ -344,6 +359,24 @@ class VAMPPlanner:
 
         start_valid = self.vamp_robot.validate(start, self.environment)
         goal_valid = self.vamp_robot.validate(goal, self.environment)
+
+        # if not start_valid:
+        #     print("\nVAMP invalid start:", np.asarray(start))
+        #     print(
+        #         "VAMP start collision debug:",
+        #         self.vamp_robot.debug(start, self.environment),
+        #         flush=True,
+        #     )
+
+        # if not goal_valid:
+        #     print("\nVAMP invalid goal:", np.asarray(goal))
+        #     print(
+        #         "VAMP goal collision debug:",
+        #         self.vamp_robot.debug(goal, self.environment),
+        #         flush=True,
+        #     )
+
+
 
         # print(f"VAMP start valid: {start_valid}", flush=True)
         # print(f"VAMP goal valid: {goal_valid}", flush=True)

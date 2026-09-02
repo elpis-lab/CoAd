@@ -23,7 +23,7 @@ from coad.planning import OMPLPlanner, euclidean_path_length
 
 from coad.planning import VAMPPlanner
 
-from coad.env import FreeEnv, CageEnv, BoxEnv, TableEnv, ShelfEnv, LargeObjectEnv, MicrowaveEnv, AllStableEnv
+from coad.env import FreeEnv, CageEnv, BoxEnv, TableEnv, ShelfEnv, LargeObjectEnv, MicrowaveEnv, AllStableEnv, RealEnv
 from coad.robot import Panda, UR10, FetchArm
 
 
@@ -968,7 +968,11 @@ class BoxGrid:
         lo = float(self._wrap_pi(lo))
         hi = float(self._wrap_pi(hi))
 
-        if lo <= hi:
+        # A zero-width interval represents a fixed yaw.
+        if np.isclose(lo, hi, atol=self.tol, rtol=0.0):
+            return np.isclose(value, lo, atol=self.tol, rtol=0.0)
+
+        if lo < hi:
             return (
                 value >= lo - self.tol
                 and value < hi
@@ -2717,6 +2721,22 @@ def evaluate_graph(
     reference_indexer = indexers[0]
     solved_keys = list(reference_key_to_root.keys())
 
+    solved_keys = [
+        key
+        for key, (root_id, goal_q) in reference_key_to_root.items()
+        if (
+            root_id is not None
+            and 0 <= root_id < len(reference_root_paths)
+            and reference_root_paths[root_id] is not None
+            and len(reference_root_paths[root_id]) > 0
+        )
+    ]
+
+    print(
+        f"Usable reference keys: {len(solved_keys)} / "
+        f"{len(reference_key_to_root)}"
+    )
+
     print(f"Number of reference adaptation keys: {len(solved_keys)}")
 
     # indexer = BoxGrid(key_to_root)
@@ -2824,7 +2844,11 @@ def evaluate_graph(
                 print(f"Original key: {key}")
                 # print(sample)
                 print(f"{adaptation} recovered key: {recovered_key_adapt}")
-                input()
+                # input()
+                continue
+
+            if root_id is None:
+                continue
 
             curr_root = root_paths_list[adaptation_ind][root_id]
             adapted_path = adapters[adaptation_ind].adapt(curr_root, curr_goal)
@@ -2881,6 +2905,7 @@ def evaluate_graph(
             
             if vamp_status == "invalid_goal" or vamp_status == "invalid_start":
                 # Resample if goal invalid for VAMP
+                # print(f"vamp status: {vamp_status}")
                 continue
 
             vamp_success.append(False)
@@ -3102,6 +3127,8 @@ def main(args):
         env = MicrowaveEnv(robot_name, using_swept_volume=False)
     elif env_name == "allstable":
         env = AllStableEnv(robot_name, using_swept_volume=False)
+    elif env_name == "real":
+        env = RealEnv(robot_name, using_swept_volume=False)
     else:
         raise ValueError(f"Invalid environment: {env_name}")
 
@@ -3165,7 +3192,8 @@ def parse_arguments():
             "free",
             "largeobj",
             "microwave",
-            "allstable"
+            "allstable",
+            "real"
             ], default="table",
     )
     parser.add_argument(
