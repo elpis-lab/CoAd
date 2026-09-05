@@ -32,10 +32,9 @@ ENV_NAME_MAP = {
 }
 
 def prepare_data(
-    robots,
-    envs,
+    experiments,
     methods,
-    metric="lengths",  # "lengths" or "times"
+    metric="lengths",
     only_success=True,
     time_in_ms=True,
     method_name_map=None,
@@ -68,95 +67,113 @@ def prepare_data(
 
     data_out = {}
 
-    for robot in robots:
-        for env in envs:
-            data_path = f"data/baseline_results_{robot}_{env}.npz"
+    for robot, env in experiments:
+        data_path = f"data/baseline_results_{robot}_{env}.npz"
 
-            if not os.path.exists(data_path):
-                print(f"[Warn] Missing: {data_path}")
-                if fill_missing_with_nan:
-                    for m in methods:
-                        data_out[(robot, env, m)] = np.array(
-                            [np.nan], dtype=float
-                        )
-                continue
+        if not os.path.exists(data_path):
+            print(f"[Warn] Missing: {data_path}")
+            if fill_missing_with_nan:
+                for m in methods:
+                    data_out[(robot, env, m)] = np.array(
+                        [np.nan], dtype=float
+                    )
+            continue
 
-            npz = np.load(data_path, allow_pickle=True)
-            results = npz["results"].item()
+        npz = np.load(data_path, allow_pickle=True)
+        results = npz["results"].item()
 
-            for m in methods:
-                if m not in method_name_map:
-                    raise KeyError(
-                        f"Method '{m}' missing from method_name_map"
+        for m in methods:
+            if m not in method_name_map:
+                raise KeyError(
+                    f"Method '{m}' missing from method_name_map"
+                )
+
+            top_key, adapt_key = method_name_map[m]
+
+            # -------- Extract raw arrays + success mask --------
+            # if top_key in ("rrtc", "library"):
+            if top_key in ("rrtc", "vamp", "library"):
+                values_raw = np.asarray(
+                    results[top_key][metric], dtype=float
+                )
+                success_raw = np.asarray(
+                    results[top_key]["success"], dtype=bool
+                )
+
+            elif top_key == "adaptations":
+                if adapt_key is None:
+                    raise ValueError(
+                        f"Adaptation method '{m}' needs adapt_key, got None"
                     )
 
-                top_key, adapt_key = method_name_map[m]
+                adaptations = results.get("adaptations", {})
+                metric_data = adaptations.get(metric, {})
+                success_data = adaptations.get("success", {})
 
-                # -------- Extract raw arrays + success mask --------
-                # if top_key in ("rrtc", "library"):
-                if top_key in ("rrtc", "vamp", "library"):
-                    values_raw = np.asarray(
-                        results[top_key][metric], dtype=float
+                if (
+                    adapt_key not in metric_data
+                    or adapt_key not in success_data
+                ):
+                    print(
+                        f"[Warn] Missing {m} data for "
+                        f"{robot}-{env}; using NaN"
                     )
-                    success_raw = np.asarray(
-                        results[top_key]["success"], dtype=bool
+                    data_out[(robot, env, m)] = np.array(
+                        [np.nan], dtype=float
+                    )
+                    continue
+
+                values_raw = np.asarray(
+                    metric_data[adapt_key],
+                    dtype=float,
+                )
+
+                success_raw = np.asarray(
+                    success_data[adapt_key],
+                    dtype=bool,
+                )
+
+            else:
+                raise ValueError(f"Unknown top_key: {top_key}")
+
+            # -------- Sanity: arrays should align by index --------
+            if strict_align_assert:
+                if values_raw.shape[0] != success_raw.shape[0]:
+                    raise ValueError(
+                        f"[{robot}-{env}-{m}] length mismatch: "
+                        f"{metric} has {values_raw.shape[0]} vs success has {success_raw.shape[0]}"
                     )
 
-                elif top_key == "adaptations":
-                    if adapt_key is None:
-                        raise ValueError(
-                            f"Adaptation method '{m}' needs adapt_key, got None"
-                        )
-                    values_raw = np.asarray(
-                        results["adaptations"][metric][adapt_key], dtype=float
-                    )
-                    success_raw = np.asarray(
-                        results["adaptations"]["success"][adapt_key],
-                        dtype=bool,
-                    )
+            # -------- Apply success mask first (key correction) --------
+            if only_success:
+                mask = success_raw
+            else:
+                mask = np.ones_like(success_raw, dtype=bool)
 
-                else:
-                    raise ValueError(f"Unknown top_key: {top_key}")
+            values = values_raw[mask]
 
-                # -------- Sanity: arrays should align by index --------
-                if strict_align_assert:
-                    if values_raw.shape[0] != success_raw.shape[0]:
-                        raise ValueError(
-                            f"[{robot}-{env}-{m}] length mismatch: "
-                            f"{metric} has {values_raw.shape[0]} vs success has {success_raw.shape[0]}"
-                        )
+            # -------- Clean + convert units --------
+            values = values[np.isfinite(values)]
 
-                # -------- Apply success mask first (key correction) --------
-                if only_success:
-                    mask = success_raw
-                else:
-                    mask = np.ones_like(success_raw, dtype=bool)
+            if metric == "times" and time_in_ms:
+                values = values * 1000.0
 
-                values = values_raw[mask]
+            # Ensure non-empty so boxplot doesn't choke
+            if values.size == 0:
+                values = np.array([np.nan], dtype=float)
 
-                # -------- Clean + convert units --------
-                values = values[np.isfinite(values)]
-
-                if metric == "times" and time_in_ms:
-                    values = values * 1000.0
-
-                # Ensure non-empty so boxplot doesn't choke
-                if values.size == 0:
-                    values = np.array([np.nan], dtype=float)
-
-                data_out[(robot, env, m)] = values
+            data_out[(robot, env, m)] = values
 
     return data_out
 
 
 def plot_path_quality_boxplot(
     data,
-    robots,
-    envs,
+    experiments,
     methods,
-    metric="lengths",  # NEW ARGUMENT
+    metric="lengths",
     save_name=None,
-    fig_size=(16, 4),
+    fig_size=(28, 5),
 ):
     """Draw the boxplot of path quality (lengths or times)"""
 
@@ -172,14 +189,7 @@ def plot_path_quality_boxplot(
     #     for env in envs
     #     if (robot, env, methods[0]) in data
     # ]
-    sections = [(robot, env) for robot in robots for env in envs]
-    
-    sections = [
-        (robot, env)
-        for robot in robots
-        for env in envs
-        # if robot == "panda" or (robot == "fetch" and env == "largeobj")
-    ]
+    sections = experiments
 
     n_methods = len(methods)
 
@@ -203,8 +213,12 @@ def plot_path_quality_boxplot(
         #     section_labels.append(f"{r.upper()} - {e.capitalize()}")
         # else:
         #     section_labels.append(f"{r.capitalize()} - {e.capitalize()}")
+        # section_labels.append(
+        #     f"{ROBOT_NAME_MAP.get(r, r)} - {ENV_NAME_MAP.get(e, e)}"
+        # )
         section_labels.append(
-            f"{ROBOT_NAME_MAP.get(r, r)} - {ENV_NAME_MAP.get(e, e)}"
+            f"{ROBOT_NAME_MAP.get(r, r)}\n"
+            f"{ENV_NAME_MAP.get(e, e)}"
         )
         pos += gap
 
@@ -212,8 +226,10 @@ def plot_path_quality_boxplot(
     regular_size = 16
     title_size = int(regular_size * 1.2)
     xlabel_ylabel_size = int(regular_size * 1.15)
+    xlabel_ylabel_size = 24
     tick_size = regular_size
-    legend_size = regular_size
+    # legend_size = regular_size
+    legend_size = 18
 
     fig, ax = plt.subplots(figsize=fig_size)
 
@@ -258,11 +274,31 @@ def plot_path_quality_boxplot(
     else:
         raise ValueError("metric must be 'times' or 'lengths'")
 
-    ax.set_xticks(section_centers)
-    ax.set_xticklabels(section_labels, fontsize=tick_size)
-    ax.tick_params(axis="y", labelsize=tick_size)
+    # ax.set_xticks(section_centers)
+    # ax.set_xticklabels(section_labels, fontsize=tick_size)
+    # ax.tick_params(axis="y", labelsize=tick_size)
 
+    # ax.set_xlim(min(positions) - 1.0, max(positions) + 1.0)
+
+    # ax.set_xticks(section_centers)
+    # ax.set_xticklabels(
+    #     section_labels,
+    #     fontsize=tick_size,
+    #     rotation=30,
+    #     ha="right",
+    # )
+
+    ax.set_xticks(section_centers)
+    ax.set_xticklabels(
+        section_labels,
+        fontsize=24,
+        rotation=0,
+        ha="center",
+    )
+    ax.tick_params(axis="y", labelsize=22)
+    
     ax.set_xlim(min(positions) - 1.0, max(positions) + 1.0)
+    # ax.set_xlim(min(positions) - 0.5, max(positions) + 0.5)
 
     # Section separators
     for i in range(1, len(sections)):
@@ -296,38 +332,61 @@ def plot_path_quality_boxplot(
     #     title_fontsize=legend_size,
     # )
 
+    # legend = ax.legend(
+    #     handles=handles,
+    #     loc="center left",
+    #     bbox_to_anchor=(1.02, 0.5),
+    #     frameon=False,
+    #     fontsize=legend_size,
+    #     title="Methods",
+    #     title_fontsize=legend_size,
+    # )
+
     legend = ax.legend(
         handles=handles,
         loc="center left",
-        bbox_to_anchor=(1.02, 0.5),
+        bbox_to_anchor=(1.005, 0.5),
         frameon=False,
-        fontsize=legend_size,
+        fontsize=24,
         title="Methods",
-        title_fontsize=legend_size,
+        title_fontsize=24,
     )
+
+    fig.subplots_adjust(left=0.065, right=0.81)
 
     for text in legend.get_texts():
         if text.get_text().startswith("CoAd"):
             text.set_fontvariant("small-caps")
 
-    fig.subplots_adjust(right=0.78)
+    # fig.subplots_adjust(right=0.78)
+    mpl.rcParams["svg.fonttype"] = "none"
 
     if save_name:
         save_path = "data/plots"
         os.makedirs(save_path, exist_ok=True)
         png = f"{save_path}/{save_name}.png"
         pdf = f"{save_path}/{save_name}.pdf"
+        svg = f"{save_path}/{save_name}.svg"
         fig.savefig(png, dpi=300, bbox_inches="tight")
         fig.savefig(pdf, dpi=300, bbox_inches="tight")
+        fig.savefig(svg, bbox_inches="tight")
         print(f"[Saved] {png}")
         print(f"[Saved] {pdf}")
+        print(f"[Saved] {svg}")
 
     plt.show()
 
 
+# def print_experiment_stats(
+#     robots,
+#     envs,
+#     methods,
+#     only_success=True,
+#     time_in_ms=True,
+#     method_name_map=None,
+# ):
 def print_experiment_stats(
-    robots,
-    envs,
+    experiments,
     methods,
     only_success=True,
     time_in_ms=True,
@@ -353,9 +412,28 @@ def print_experiment_stats(
         method_name_map = default_method_name_map
 
     # Load filtered arrays for computing means
+    # data_times = prepare_data(
+    #     robots,
+    #     envs,
+    #     methods,
+    #     metric="times",
+    #     only_success=only_success,
+    #     time_in_ms=time_in_ms,
+    #     method_name_map=method_name_map,
+    # )
+
+    # data_lengths = prepare_data(
+    #     robots,
+    #     envs,
+    #     methods,
+    #     metric="lengths",
+    #     only_success=only_success,
+    #     time_in_ms=False,
+    #     method_name_map=method_name_map,
+    # )
+
     data_times = prepare_data(
-        robots,
-        envs,
+        experiments,
         methods,
         metric="times",
         only_success=only_success,
@@ -364,8 +442,7 @@ def print_experiment_stats(
     )
 
     data_lengths = prepare_data(
-        robots,
-        envs,
+        experiments,
         methods,
         metric="lengths",
         only_success=only_success,
@@ -373,63 +450,77 @@ def print_experiment_stats(
         method_name_map=method_name_map,
     )
 
-    for robot in robots:
-        for env in envs:
+    # for robot in robots:
+    #     for env in envs:
+    for robot, env in experiments:
 
-            data_path = f"data/baseline_results_{robot}_{env}.npz"
+        data_path = f"data/baseline_results_{robot}_{env}.npz"
 
-            if not os.path.exists(data_path):
-                print(f"[Warn] Missing {data_path}")
-                continue
+        if not os.path.exists(data_path):
+            print(f"[Warn] Missing {data_path}")
+            continue
 
-            npz = np.load(data_path, allow_pickle=True)
-            results = npz["results"].item()
+        npz = np.load(data_path, allow_pickle=True)
+        results = npz["results"].item()
 
-            print("\n" + "=" * 60)
-            print(f"{robot} - {env}")
-            print("=" * 60)
+        print("\n" + "=" * 60)
+        print(f"{robot} - {env}")
+        print("=" * 60)
 
-            for m in methods:
+        for m in methods:
 
-                top_key, adapt_key = method_name_map[m]
+            top_key, adapt_key = method_name_map[m]
 
-                # ------------------------
-                # SUCCESS RATE
-                # ------------------------
-                # if top_key in ("rrtc", "library"):
-                if top_key in ("rrtc", "vamp", "library"):
-                    success = np.asarray(
-                        results[top_key]["success"], dtype=bool
-                    )
-
-                elif top_key == "adaptations":
-                    success = np.asarray(
-                        results["adaptations"]["success"][adapt_key],
-                        dtype=bool,
-                    )
-
-                total = len(success)
-                solved = np.sum(success)
-                success_rate = 100.0 * solved / total if total > 0 else np.nan
-
-                # ------------------------
-                # MEAN + STD
-                # ------------------------
-                times = data_times[(robot, env, m)]
-                lengths = data_lengths[(robot, env, m)]
-
-                mean_time = np.nanmean(times)
-                std_time = np.nanstd(times)
-
-                mean_len = np.nanmean(lengths)
-                std_len = np.nanstd(lengths)
-
-                print(
-                    f"{m:<20} | "
-                    f"success: {success_rate:6.2f}% ({solved}/{total}) | "
-                    f"time: {mean_time:8.3f} ± {std_time:6.3f} ms | "
-                    f"length: {mean_len:8.3f} ± {std_len:6.3f}"
+            # ------------------------
+            # SUCCESS RATE
+            # ------------------------
+            # if top_key in ("rrtc", "library"):
+            if top_key in ("rrtc", "vamp", "library"):
+                success = np.asarray(
+                    results[top_key]["success"], dtype=bool
                 )
+
+            elif top_key == "adaptations":
+                adaptation_success = (
+                    results
+                    .get("adaptations", {})
+                    .get("success", {})
+                )
+
+                if adapt_key not in adaptation_success:
+                    print(
+                        f"{m:<20} | "
+                        f"not available for {robot}-{env}"
+                    )
+                    continue
+
+                success = np.asarray(
+                    adaptation_success[adapt_key],
+                    dtype=bool,
+                )
+
+            total = len(success)
+            solved = np.sum(success)
+            success_rate = 100.0 * solved / total if total > 0 else np.nan
+
+            # ------------------------
+            # MEAN + STD
+            # ------------------------
+            times = data_times[(robot, env, m)]
+            lengths = data_lengths[(robot, env, m)]
+
+            mean_time = np.nanmean(times)
+            std_time = np.nanstd(times)
+
+            mean_len = np.nanmean(lengths)
+            std_len = np.nanstd(lengths)
+
+            print(
+                f"{m:<20} | "
+                f"success: {success_rate:6.2f}% ({solved}/{total}) | "
+                f"time: {mean_time:8.3f} ± {std_time:6.3f} ms | "
+                f"length: {mean_len:8.3f} ± {std_len:6.3f}"
+            )
 
 
 if __name__ == "__main__":
@@ -457,15 +548,55 @@ if __name__ == "__main__":
     envs = ["table", "cage", "allstable", "largeobj"]
 
 
-    # Print stats first
+    experiments = [
+        ("panda", "table"),
+        ("panda", "allstable"),
+        ("panda", "cage"),
+        ("panda", "largeobj"),
+        ("panda", "microwave"),
+        ("fetch", "table"),
+        ("fetch", "allstable"),
+        ("fetch", "cage"),
+        ("fetch", "largeobj"),
+        ("fetch", "microwave"),
+        ("ur10", "real"),
+    ]
+
+    # # Print stats first
+    # print_experiment_stats(
+    #     robots, envs, methods, only_success=True, time_in_ms=True
+    # )
+
+    # metric = "times"
+    # data = prepare_data(
+    #     robots, envs, methods, metric=metric, only_success=True
+    # )
+    # plot_path_quality_boxplot(
+    #     data, robots, envs, methods, metric=metric, save_name="times"
+    # )
+
     print_experiment_stats(
-        robots, envs, methods, only_success=True, time_in_ms=True
+        experiments,
+        methods,
+        only_success=True,
+        time_in_ms=True,
     )
 
     metric = "times"
+
     data = prepare_data(
-        robots, envs, methods, metric=metric, only_success=True
+        experiments,
+        methods,
+        metric=metric,
+        only_success=True,
     )
+
     plot_path_quality_boxplot(
-        data, robots, envs, methods, metric=metric, save_name="times"
+        data,
+        experiments,
+        methods,
+        metric=metric,
+        save_name="times_vamp",
+        # fig_size=(28, 5),
+        fig_size=(24, 5),
     )
