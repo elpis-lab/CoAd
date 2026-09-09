@@ -115,8 +115,8 @@ class MujocoEnv:
         elif env_name in ['table', 'largeobj', 'microwave', 'allstable']:
             intervals = self.find_problem_intervals(scene_yaml, base_name="table_top", wall_clearance=0.18)
         elif env_name == "shelf":
-            #bases = ['shelf_bottom', 'shelf_middle_bottom', 'shelf_middle', 'shelf_middle_top', 'shelf_top']
-            bases = ['shelf_middle']
+            bases = ['shelf_bottom', 'shelf_middle_bottom', 'shelf_middle', 'shelf_middle_top', 'shelf_top']
+            # bases = ['shelf_middle']
             intervals = self.find_problem_intervals(scene_yaml, bases, 0.12, 0.14)
         else:
             intervals = None
@@ -310,10 +310,23 @@ class MujocoEnv:
                 del_geom_x = half_finger_clearance - sx / 2
                 del_geom_y = half_finger_length - sy / 2
 
+            # elif x_fits and y_fits:
+            #     # choose convention, or create both candidate families
+            #     del_geom_x = half_finger_clearance - sx / 2
+            #     del_geom_y = half_finger_length - sy / 2
+
             elif x_fits and y_fits:
-                # choose convention, or create both candidate families
-                del_geom_x = half_finger_clearance - sx / 2
-                del_geom_y = half_finger_length - sy / 2
+                # The object fits between the fingers.
+                del_geom_x = (
+                    half_finger_clearance - sx / 2.0
+                )
+
+                # Allow sliding along the finger length while retaining
+                # at least min_contact_overlap of contact.
+                del_geom_y = max(
+                    0.0,
+                    sy / 2.0 - min_contact_overlap,
+                )
 
             else:
                 raise ValueError("Object does not fit between fingers.")
@@ -361,13 +374,13 @@ class MujocoEnv:
             half_finger_clearance = 0.038
             half_finger_length = 0.015
             ee_z_offset = 0.0
-            ee_offset = 0.016
+            ee_offset = 0.0
 
         elif self.env_details['robot'] == 'fetch':
             half_finger_clearance = 0.048
             half_finger_length = 0.03
             ee_z_offset = 0.02
-            ee_offset = 0.04
+            ee_offset = 0.005
         
         elif self.env_details['robot'] == 'g1':
             half_finger_clearance = 0.038
@@ -3403,113 +3416,243 @@ class TableEnv(MujocoEnv):
 class ShelfEnv(MujocoEnv):
     """Thin shelf environment"""
 
-    def __init__(self, robot, no_sv=False):
-        """Initialize thin shelf environment"""
+    # def __init__(self, robot, no_sv=False):
+    #     """Initialize thin shelf environment"""
+    #     super().__init__(robot)
+
+    #     # Problem parameters
+    #     object_type = "box"
+    #     object_size = [0.03, 0.03, 0.15]
+    #     yaw_variation = [-0.5*np.pi, 0.5*np.pi]
+    #     yaw_buffer = 6*(np.pi/180)
+
+    #     # Prepare target object        
+    #     object_variation = {
+    #         'x': [[-0.8, 0.8]],
+    #         'y': [[-0.8, 0.8]],
+    #         'z': [[object_size[2]/2, object_size[2]/2]],
+    #         'yaw': [yaw_variation]
+    #     }
+    #     super().populate_object_details(object_type, object_size, object_variation)
+
+    #     # Prepare environment details
+    #     if robot=="panda":
+    #         config_yaml = "configs/problems/bookshelf_thin_panda.yaml"
+    #     elif robot=="fetch":
+    #         config_yaml = "configs/problems/bookshelf_thin_fetch.yaml"
+    #     elif robot=="ur10":
+    #         config_yaml = "configs/problems/bookshelf_thin_ur5.yaml"
+        
+    #     scene_yaml = "configs/scenes/bookshelf/scene_thin.yaml"
+    #     with open(config_yaml, "r") as f:
+    #         config_yaml_data = yaml.safe_load(f)
+        
+    #     robot_pos = config_yaml_data['base_offset']['position']
+    #     robot_quat = super().quat_xyzw_to_wxyz(config_yaml_data['base_offset']['orientation'])
+
+    #     if robot == "panda":
+    #         inner_rad = 0.3
+    #         outer_rad = 0.75
+    #     elif robot == "fetch":
+    #         inner_rad = 0.3
+    #         outer_rad = 0.75
+    #     elif robot == "ur10":
+    #         inner_rad = 0.3
+    #         #self.object_outer_rad = 1.1
+    #         outer_rad = 0.65
+
+    #     super().populate_env_details(scene_yaml, robot, "shelf", robot_pos, robot_quat, outer_rad, inner_rad)
+
+    #     # Prepare grasp details
+    #     super().populate_grasp_details(yaw_buffer=yaw_buffer, grasp_type="front")
+    #     tcr_intervals = super().construct_tcr()
+
+    #     # shelf_thickness = 0.18
+    #     shelf_thickness = 0.12
+    #     dividing_wall_thickness = 0.14
+    #     # bases = ['shelf_bottom', 'shelf_middle_bottom', 'shelf_middle', 'shelf_middle_top', 'shelf_top']
+    #     bases = ["shelf_middle"]
+    #     shelf_intervals = self.find_problem_intervals(
+    #         bases, shelf_thickness, dividing_wall_thickness
+    #     )
+    #     self.problem = {
+    #         "name": "shelf",
+    #         "intervals": shelf_intervals,
+    #         "robot": f"{robot}",
+    #     }
+    #     # Annulus of object positions
+    #     if robot == "panda":
+    #         self.object_inner_rad = 0.3
+    #         self.object_outer_rad = 0.75
+    #     elif robot == "fetch":
+    #         self.object_inner_rad = 0.3
+    #         self.object_outer_rad = 0.75
+    #     elif robot == "ur10":
+    #         self.object_inner_rad = 0.3
+    #         # self.object_outer_rad = 1.1
+    #         self.object_outer_rad = 0.65
+
+    #         # self.robot_pos[0] = self.robot_pos[0]-0.8
+
+    #     self.object_yaw = 0.01 * np.pi  # -yaw to +yaw
+    #     self.object_details["dist"] = [
+    #         self.object_outer_rad,
+    #         self.object_outer_rad,
+    #         0,
+    #         self.object_yaw,
+    #     ]
+    #     # Find TSR parameters
+    #     sv_config = super().initialize_TSR_parameters(
+    #         robot, grasp_strategy="front"
+    #     )
+
+    #     # Add environment xmls and build model
+    #     # sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config)
+    #     if no_sv == False:
+    #         sv_xml = super().cube_swept_volume_xml(
+    #             self.object_details["size"], sv_config
+    #         )
+    #     else:
+    #         sv_xml = super().cube_object_xml(
+    #             self.object_details["size"], [1, 1, 0, 0]
+    #         )
+    #     shelf_xml = super().build_xml(
+    #         parent_body_name="scene_shelf", skip_ids={"Cube1"}
+    #     )
+
+    #     xmls_to_add = [sv_xml, shelf_xml]
+    #     free_xml_path = f"{self.robot_dir}/shelf_scene.xml"
+    #     self.model, self.data = super().build_model(free_xml_path, xmls_to_add)
+
+    def __init__(self, robot, using_swept_volume=True):
+        """Initialize the thin shelf environment."""
         super().__init__(robot)
 
-        # Problem parameters
+        # Object details
         object_type = "box"
         object_size = [0.03, 0.03, 0.15]
-        yaw_variation = [-0.5*np.pi, 0.5*np.pi]
-        yaw_buffer = 6*(np.pi/180)
 
-        # Prepare target object        
+        yaw_variation = [
+            -0.5 * np.pi,
+            0.5 * np.pi,
+        ]
+
         object_variation = {
-            'x': [[-0.8, 0.8]],
-            'y': [[-0.8, 0.8]],
-            'z': [[object_size[2]/2, object_size[2]/2]],
-            'yaw': [yaw_variation]
+            "x": [[-0.8, 0.8]],
+            "y": [[-0.8, 0.8]],
+            "z": [
+                [
+                    object_size[2] / 2.0,
+                    object_size[2] / 2.0,
+                ]
+            ],
+            "yaw": [yaw_variation],
         }
-        super().populate_object_details(object_type, object_size, object_variation)
 
-        # Prepare environment details
-        if robot=="panda":
-            config_yaml = "configs/problems/bookshelf_thin_panda.yaml"
-        elif robot=="fetch":
-            config_yaml = "configs/problems/bookshelf_thin_fetch.yaml"
-        elif robot=="ur10":
-            config_yaml = "configs/problems/bookshelf_thin_ur5.yaml"
-        
-        scene_yaml = "configs/scenes/bookshelf/scene_thin.yaml"
-        with open(config_yaml, "r") as f:
-            config_yaml_data = yaml.safe_load(f)
-        
-        robot_pos = config_yaml_data['base_offset']['position']
-        robot_quat = super().quat_xyzw_to_wxyz(config_yaml_data['base_offset']['orientation'])
+        super().populate_object_details(
+            object_type,
+            object_size,
+            object_variation,
+        )
 
+        #Environment details
         if robot == "panda":
+            config_yaml = (
+                "configs/problems/"
+                "bookshelf_thin_panda.yaml"
+            )
             inner_rad = 0.3
             outer_rad = 0.75
+
         elif robot == "fetch":
+            config_yaml = (
+                "configs/problems/"
+                "bookshelf_thin_fetch.yaml"
+            )
             inner_rad = 0.3
             outer_rad = 0.75
+
         elif robot == "ur10":
+            # Preserve the existing configuration filename.
+            config_yaml = (
+                "configs/problems/"
+                "bookshelf_thin_ur5.yaml"
+            )
             inner_rad = 0.3
-            #self.object_outer_rad = 1.1
             outer_rad = 0.65
 
-        super().populate_env_details(scene_yaml, robot, "shelf", robot_pos, robot_quat, outer_rad, inner_rad)
+        else:
+            raise ValueError(
+                f"Unsupported ShelfEnv robot: {robot}"
+            )
 
-        # Prepare grasp details
-        super().populate_grasp_details(yaw_buffer=yaw_buffer, grasp_type="front")
+        scene_yaml = (
+            "configs/scenes/bookshelf/"
+            "scene_thin.yaml"
+        )
+
+        with open(config_yaml, "r") as file:
+            config_data = yaml.safe_load(file)
+
+        robot_pos = config_data[
+            "base_offset"
+        ]["position"]
+
+        robot_quat = super().quat_xyzw_to_wxyz(
+            config_data[
+                "base_offset"
+            ]["orientation"]
+        )
+
+        super().populate_env_details(
+            scene_yaml=scene_yaml,
+            robot_name=robot,
+            env_name="shelf",
+            robot_pos=robot_pos,
+            robot_quat=robot_quat,
+            outer_rad=outer_rad,
+            inner_rad=inner_rad,
+        )
+
+        #Grasp details
+        super().populate_grasp_details(
+            yaw_buffer=6 * (np.pi / 180),
+            grasp_type="front",
+        )
+
         tcr_intervals = super().construct_tcr()
 
-        # shelf_thickness = 0.18
-        shelf_thickness = 0.12
-        dividing_wall_thickness = 0.14
-        # bases = ['shelf_bottom', 'shelf_middle_bottom', 'shelf_middle', 'shelf_middle_top', 'shelf_top']
-        bases = ["shelf_middle"]
-        shelf_intervals = self.find_problem_intervals(
-            bases, shelf_thickness, dividing_wall_thickness
-        )
-        self.problem = {
-            "name": "shelf",
-            "intervals": shelf_intervals,
-            "robot": f"{robot}",
-        }
-        # Annulus of object positions
-        if robot == "panda":
-            self.object_inner_rad = 0.3
-            self.object_outer_rad = 0.75
-        elif robot == "fetch":
-            self.object_inner_rad = 0.3
-            self.object_outer_rad = 0.75
-        elif robot == "ur10":
-            self.object_inner_rad = 0.3
-            # self.object_outer_rad = 1.1
-            self.object_outer_rad = 0.65
-
-            # self.robot_pos[0] = self.robot_pos[0]-0.8
-
-        self.object_yaw = 0.01 * np.pi  # -yaw to +yaw
-        self.object_details["dist"] = [
-            self.object_outer_rad,
-            self.object_outer_rad,
-            0,
-            self.object_yaw,
-        ]
-        # Find TSR parameters
-        sv_config = super().initialize_TSR_parameters(
-            robot, grasp_strategy="front"
-        )
-
-        # Add environment xmls and build model
-        # sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config)
-        if no_sv == False:
-            sv_xml = super().cube_swept_volume_xml(
-                self.object_details["size"], sv_config
+        if using_swept_volume:
+            object_xml = super().create_swept_volume(
+                tcr_intervals,
             )
         else:
-            sv_xml = super().cube_object_xml(
-                self.object_details["size"], [1, 1, 0, 0]
+            object_xml = super().cube_object_xml(
+                self.object_details["size"],
+                [0, 0, 0, 0],
             )
+
         shelf_xml = super().build_xml(
-            parent_body_name="scene_shelf", skip_ids={"Cube1"}
+            scene_yaml,
+            parent_body_name="scene_shelf",
+            skip_ids={"Cube1"},
         )
 
-        xmls_to_add = [sv_xml, shelf_xml]
-        free_xml_path = f"{self.robot_dir}/shelf_scene.xml"
-        self.model, self.data = super().build_model(free_xml_path, xmls_to_add)
+        xmls_to_add = [
+            object_xml,
+            shelf_xml,
+        ]
+
+        free_xml_path = (
+            f"{self.robot_dir}/shelf_scene.xml"
+        )
+
+        self.model, self.data = super().build_model(
+            free_xml_path,
+            xmls_to_add,
+        )
+
+
 
     def find_problem_intervals(self, scene_yaml, bases, wall_clearance, dividing_wall_clearance):
         with open(scene_yaml, "r") as f:
@@ -3622,55 +3765,55 @@ class ShelfEnv(MujocoEnv):
         # print(regions)
         return regions
 
-    def generate_task_set(self):
-        """Generate task set/TSRs"""
+    # def generate_task_set(self):
+    #     """Generate task set/TSRs"""
 
-        iTSR_dict = {}
-        yaw_iTSR_set, _ = find_yaw_iTSR_set(
-            self.object_details,
-            self.problem_details,
-            self.Tw2_w1,
-        )
+    #     iTSR_dict = {}
+    #     yaw_iTSR_set, _ = find_yaw_iTSR_set(
+    #         self.object_details,
+    #         self.problem_details,
+    #         self.Tw2_w1,
+    #     )
 
-        for curr_base_ind in range(len(self.base_zpos)):
-            curr_base_zdim = self.base_zdim[curr_base_ind]
-            curr_base_zpos = self.base_zpos[curr_base_ind]
-            # print(curr_base_zdim)
-            # print(curr_base_zpos)
-            z_object = (
-                curr_base_zpos
-                + (curr_base_zdim / 2)
-                + (self.object_details["size"][2] / 2)
-            )
-            object_position = [self.robot_pos[0], self.robot_pos[1], z_object]
-            # print(object_position)
-            object_type = self.object_details["type"]
-            object_size = self.object_details["size"]
-            object_dist = self.object_details["dist"]
-            self.object_details = {
-                "type": object_type,
-                "size": object_size,
-                "position": object_position,
-                "yaw": 0,
-                "dist": object_dist,
-            }
-            print(f"Base: {self.base_names[curr_base_ind]}")
-            curr_base_iTSR_set, _ = find_iTSR_set(
-                self.object_details,
-                self.problem_details,
-                self.yaw_tw2_w1_dict,
-                yaw_iTSR_set,
-                problem=self.problem,
-                robot_pos=self.robot_pos,
-            )
-            # print(len(curr_base_iTSR_set[0]))
-            iTSR_dict.update(curr_base_iTSR_set[0])
+    #     for curr_base_ind in range(len(self.base_zpos)):
+    #         curr_base_zdim = self.base_zdim[curr_base_ind]
+    #         curr_base_zpos = self.base_zpos[curr_base_ind]
+    #         # print(curr_base_zdim)
+    #         # print(curr_base_zpos)
+    #         z_object = (
+    #             curr_base_zpos
+    #             + (curr_base_zdim / 2)
+    #             + (self.object_details["size"][2] / 2)
+    #         )
+    #         object_position = [self.robot_pos[0], self.robot_pos[1], z_object]
+    #         # print(object_position)
+    #         object_type = self.object_details["type"]
+    #         object_size = self.object_details["size"]
+    #         object_dist = self.object_details["dist"]
+    #         self.object_details = {
+    #             "type": object_type,
+    #             "size": object_size,
+    #             "position": object_position,
+    #             "yaw": 0,
+    #             "dist": object_dist,
+    #         }
+    #         print(f"Base: {self.base_names[curr_base_ind]}")
+    #         curr_base_iTSR_set, _ = find_iTSR_set(
+    #             self.object_details,
+    #             self.problem_details,
+    #             self.yaw_tw2_w1_dict,
+    #             yaw_iTSR_set,
+    #             problem=self.problem,
+    #             robot_pos=self.robot_pos,
+    #         )
+    #         # print(len(curr_base_iTSR_set[0]))
+    #         iTSR_dict.update(curr_base_iTSR_set[0])
 
-        # iTSR_set, _ = find_iTSR_set(self.object_details, self.problem_details, self.yaw_tw2_w1_dict, yaw_iTSR_set, problem=self.problem, robot_pos=self.robot_pos)
-        # iTSR_set = [iTSR_dict]
-        # self.task_set = iTSR_set[0]
-        self.task_set = iTSR_dict
-        return self.task_set
+    #     # iTSR_set, _ = find_iTSR_set(self.object_details, self.problem_details, self.yaw_tw2_w1_dict, yaw_iTSR_set, problem=self.problem, robot_pos=self.robot_pos)
+    #     # iTSR_set = [iTSR_dict]
+    #     # self.task_set = iTSR_set[0]
+    #     self.task_set = iTSR_dict
+    #     return self.task_set
 
 
 

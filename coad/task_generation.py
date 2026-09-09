@@ -915,20 +915,77 @@ def tile_in_reachable_annulus(tile, robot_pos, inner_rad, outer_rad):
 
     return (rmin <= outer_rad) and (rmax >= inner_rad)
 
-def tile_inside_intervals(tile, intervals):
+# def tile_inside_intervals(tile, intervals):
 
-    if not intervals:
+#     if not intervals:
+#         return True
+
+#     xmin, xmax = intervals[0]
+#     ymin, ymax = intervals[1]
+
+#     return (
+#         min(tile["x"]) >= xmin and
+#         max(tile["x"]) <= xmax and
+#         min(tile["y"]) >= ymin and
+#         max(tile["y"]) <= ymax
+#     )
+
+def tile_inside_intervals(tile, intervals):
+    """Check whether an xy tile lies inside any valid xy region."""
+
+    if intervals is None:
         return True
 
-    xmin, xmax = intervals[0]
-    ymin, ymax = intervals[1]
-
-    return (
-        min(tile["x"]) >= xmin and
-        max(tile["x"]) <= xmax and
-        min(tile["y"]) >= ymin and
-        max(tile["y"]) <= ymax
+    intervals_array = np.asarray(
+        intervals,
+        dtype=float,
     )
+
+    # A single region:
+    # [
+    #     [xmin, xmax],
+    #     [ymin, ymax],
+    # ]
+    if intervals_array.shape == (2, 2):
+        regions = intervals_array[None, :, :]
+
+    # Multiple regions:
+    # [
+    #     [[xmin, xmax], [ymin, ymax]],
+    #     ...
+    # ]
+    elif (
+        intervals_array.ndim == 3
+        and intervals_array.shape[1:] == (2, 2)
+    ):
+        regions = intervals_array
+
+    else:
+        raise ValueError(
+            "Expected intervals with shape (2, 2) or "
+            f"(N, 2, 2), got {intervals_array.shape}"
+        )
+
+    tile_xmin = min(tile["x"])
+    tile_xmax = max(tile["x"])
+    tile_ymin = min(tile["y"])
+    tile_ymax = max(tile["y"])
+
+    for region in regions:
+        xmin, xmax = region[0]
+        ymin, ymax = region[1]
+
+        completely_inside = (
+            tile_xmin >= xmin
+            and tile_xmax <= xmax
+            and tile_ymin >= ymin
+            and tile_ymax <= ymax
+        )
+
+        if completely_inside:
+            return True
+
+    return False
 
 def tile_center(tile):
     return {
@@ -1017,6 +1074,10 @@ def create_TCR_set(env, batch_idx=None):
     
     # tiles = list(tile_region(regions, bin_widths))
     # tiles, n_tiles = tile_region(regions, bin_widths)
+
+    print("TCR intervals:", tcr_intervals)
+    print("Bin widths:", bin_widths)
+    print("Regions:", regions)
 
     per_dim_bins, n_tiles = find_bins_per_dim(regions, bin_widths)
 
