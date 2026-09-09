@@ -10,8 +10,6 @@ from pathlib import Path
 
 import itertools
 import pickle
-import re
-from pathlib import Path
 from pprint import pprint
 
 import mujoco.viewer
@@ -2583,7 +2581,7 @@ class MujocoEnv:
             data = self.data
 
         # This is a pose, unlike move_swept_volume's interval-based dummy_config.
-        dummy_pose = (1.0, 1.0, 0.0, 0.0)
+        dummy_pose = (1.0, 1.0, -10.0, 0.0)
 
         def move_one_object(joint_name, pose):
             if len(pose) != 4:
@@ -3330,8 +3328,33 @@ class CageEnv(MujocoEnv):
         cage_xml = super().build_xml(scene_yaml, parent_body_name="scene_cage", skip_ids={"Cube1"})
         xmls_to_add.append(cage_xml)
 
-        free_xml_path = f"{self.robot_dir}/cage_scene.xml"
-        self.model, self.data = super().build_model(free_xml_path, xmls_to_add)
+        # free_xml_path = f"{self.robot_dir}/cage_scene.xml"
+        # self.model, self.data = super().build_model(free_xml_path, xmls_to_add)
+
+        if robot == "panda":
+            # The generated wrapper XML is placed in the repository root.
+            # This avoids nested relative-path resolution under robot_dir.
+            self.base_xml = (
+                "assets/franka_emika_panda/double_scene.xml"
+            )
+            free_xml_path = "cage_double_scene.xml"
+        elif robot == "fetch":
+            self.base_xml = (
+                "assets/fetch/double_scene.xml"
+            )
+            free_xml_path = (
+                "cage_double_scene.xml"
+            )
+
+        else:
+            free_xml_path = (
+                f"{self.robot_dir}/cage_scene.xml"
+            )
+
+        self.model, self.data = super().build_model(
+            free_xml_path,
+            xmls_to_add,
+        )
 
 class TableEnv(MujocoEnv):
     """Table environment"""
@@ -3396,9 +3419,33 @@ class TableEnv(MujocoEnv):
         table_xml = super().build_xml(scene_yaml, parent_body_name="scene_table", skip_ids={"Cube1"})
         xmls_to_add.append(table_xml)
 
-        free_xml_path = f"{self.robot_dir}/table_scene.xml"
-        self.model, self.data = super().build_model(free_xml_path, xmls_to_add)
+        # free_xml_path = f"{self.robot_dir}/table_scene.xml"
+        # self.model, self.data = super().build_model(free_xml_path, xmls_to_add)
 
+        if robot == "panda":
+            # The generated wrapper XML is placed in the repository root.
+            # This avoids nested relative-path resolution under robot_dir.
+            self.base_xml = (
+                "assets/franka_emika_panda/double_scene.xml"
+            )
+            free_xml_path = "empty_table_double_scene.xml"
+        elif robot == "fetch":
+            self.base_xml = (
+                "assets/fetch/double_scene.xml"
+            )
+            free_xml_path = (
+                "table_double_scene.xml"
+            )
+
+        else:
+            free_xml_path = (
+                f"{self.robot_dir}/table_double_scene.xml"
+            )
+
+        self.model, self.data = super().build_model(
+            free_xml_path,
+            xmls_to_add,
+        )
 
 class ShelfEnv(MujocoEnv):
     """Thin shelf environment"""
@@ -4466,8 +4513,33 @@ class LargeObjectEnv(MujocoEnv):
         table_xml = super().build_xml(scene_yaml, parent_body_name="scene_table")
         xmls_to_add.append(table_xml)
 
-        free_xml_path = f"{self.robot_dir}/empty_table_scene.xml"
-        self.model, self.data = super().build_model(free_xml_path, xmls_to_add)
+        # free_xml_path = f"{self.robot_dir}/empty_table_scene.xml"
+        # self.model, self.data = super().build_model(free_xml_path, xmls_to_add)
+
+        if robot == "panda":
+            # The generated wrapper XML is placed in the repository root.
+            # This avoids nested relative-path resolution under robot_dir.
+            self.base_xml = (
+                "assets/franka_emika_panda/double_scene.xml"
+            )
+            free_xml_path = "empty_table_double_scene.xml"
+        elif robot == "fetch":
+            self.base_xml = (
+                "assets/fetch/double_scene.xml"
+            )
+            free_xml_path = (
+                "empty_table_double_scene.xml"
+            )
+
+        else:
+            free_xml_path = (
+                f"{self.robot_dir}/empty_table_double_scene.xml"
+            )
+
+        self.model, self.data = super().build_model(
+            free_xml_path,
+            xmls_to_add,
+        )
 
 class MicrowaveEnv(MujocoEnv):
     """Table environment with a microwave object"""
@@ -4557,8 +4629,33 @@ class MicrowaveEnv(MujocoEnv):
         # xmls_to_add.append(inner_xml)
         # xmls_to_add.append(outer_xml)
 
-        free_xml_path = f"{self.robot_dir}/empty_table_scene.xml"
-        self.model, self.data = super().build_model(free_xml_path, xmls_to_add)
+        # free_xml_path = f"{self.robot_dir}/empty_table_scene.xml"
+        # self.model, self.data = super().build_model(free_xml_path, xmls_to_add)
+
+        if robot == "panda":
+            # The generated wrapper XML is placed in the repository root.
+            # This avoids nested relative-path resolution under robot_dir.
+            self.base_xml = (
+                "assets/franka_emika_panda/double_scene.xml"
+            )
+            free_xml_path = "empty_table_double_scene.xml"
+        elif robot == "fetch":
+            self.base_xml = (
+                "assets/fetch/double_scene.xml"
+            )
+            free_xml_path = (
+                "empty_table_double_scene.xml"
+            )
+
+        else:
+            free_xml_path = (
+                f"{self.robot_dir}/empty_table_double_scene.xml"
+            )
+
+        self.model, self.data = super().build_model(
+            free_xml_path,
+            xmls_to_add,
+        )
 
     def populate_object_details(self, object_type, object_size, object_variation):
         
@@ -4685,8 +4782,33 @@ class AllStableEnv(MujocoEnv):
         table_xml = super().build_xml(scene_yaml, parent_body_name="scene_table")
         xmls_to_add.append(table_xml)
 
-        free_xml_path = f"{self.robot_dir}/empty_table_scene.xml"
-        self.model, self.data = super().build_model(free_xml_path, xmls_to_add)
+        # free_xml_path = f"{self.robot_dir}/empty_table_scene.xml"
+        # self.model, self.data = super().build_model(free_xml_path, xmls_to_add)
+
+        if robot == "panda":
+            # The generated wrapper XML is placed in the repository root.
+            # This avoids nested relative-path resolution under robot_dir.
+            self.base_xml = (
+                "assets/franka_emika_panda/double_scene.xml"
+            )
+            free_xml_path = "empty_table_double_scene.xml"
+        elif robot == "fetch":
+            self.base_xml = (
+                "assets/fetch/double_scene.xml"
+            )
+            free_xml_path = (
+                "empty_table_double_scene.xml"
+            )
+
+        else:
+            free_xml_path = (
+                f"{self.robot_dir}/empty_table_double_scene.xml"
+            )
+
+        self.model, self.data = super().build_model(
+            free_xml_path,
+            xmls_to_add,
+        )
 
     def generate_task_set(self):
         """Generate task set/TSRs"""

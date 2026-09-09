@@ -165,6 +165,91 @@ class Panda(MujocoRobot):
             self.data.qpos[model.jnt_qposadr[j_id]] = self.FINGER_OPEN[i]
         mujoco.mj_forward(model, self.data)
 
+class Panda(MujocoRobot):
+    ARM = [
+        "joint1",
+        "joint2",
+        "joint3",
+        "joint4",
+        "joint5",
+        "joint6",
+        "joint7",
+    ]
+    HOME_POS_DEFAULT = [0, 0, 0, -np.pi / 2, 0, np.pi / 2, -np.pi / 4]
+
+    # Home pose for under table
+    HOME_POS_UNDER_TABLE = [-1.6362, -1.7276, 2.151, -1.0680, -2.2128, 2.4997, 1.1928]
+
+    FINGER = ["finger_joint1", "finger_joint2"]
+    FINGER_OPEN = [0.04, 0.04]
+    FINGER_CLOSED = [0.0, 0.0]
+
+    def __init__(
+        self,
+        model,
+        data=None,
+        visualize=False,
+        home_pose="default",
+        prefix="",
+    ):
+        self.prefix = prefix
+
+        def prefixed(name):
+            return f"{prefix}{name}"
+
+        arm_joints = [
+            prefixed(name)
+            for name in self.ARM
+        ]
+
+        finger_joints = [
+            prefixed(name)
+            for name in self.FINGER
+        ]
+
+        MujocoRobot.__init__(
+            self,
+            model,
+            joint_names=arm_joints,
+            root_link=prefixed("link0"),
+            data=data,
+            collision_geom_group=3,
+            ee_name=prefixed("attachment_site"),
+            visualize=visualize,
+        )
+
+        if home_pose == "default":
+            self.home_pos = self.HOME_POS_DEFAULT.copy()
+        elif home_pose == "new":
+            self.home_pos = self.HOME_POS_UNDER_TABLE.copy()
+        else:
+            raise ValueError(
+                f"Unknown Panda home pose: {home_pose!r}"
+            )
+
+        self.set_joint_qpos(self.home_pos)
+
+        for finger_name, finger_position in zip(
+            finger_joints,
+            self.FINGER_OPEN,
+        ):
+            joint_id = mujoco.mj_name2id(
+                model,
+                mujoco.mjtObj.mjOBJ_JOINT,
+                finger_name,
+            )
+
+            if joint_id == -1:
+                raise ValueError(
+                    f"Could not find joint: {finger_name}"
+                )
+
+            self.data.qpos[
+                model.jnt_qposadr[joint_id]
+            ] = finger_position
+
+        mujoco.mj_forward(model, self.data)
+
 class G1(MujocoRobot):
     """Unitree G1 specialization"""
 
@@ -356,6 +441,136 @@ class FetchArm(MujocoRobot):
             self.data.qpos[model.jnt_qposadr[j_id]] = self.FINGER_OPEN[i]
         mujoco.mj_forward(model, self.data)
 
+class FetchArm(MujocoRobot):
+
+    """Fetch specialization with optional MJCF name prefix."""
+
+    ARM = [
+
+        "torso_lift_joint",
+        "shoulder_pan_joint",
+        "shoulder_lift_joint",
+        "upperarm_roll_joint",
+        "elbow_flex_joint",
+        "forearm_roll_joint",
+        "wrist_flex_joint",
+        "wrist_roll_joint",
+    ]
+
+    FINGER = [
+        "r_gripper_finger_joint",
+        "l_gripper_finger_joint",
+    ]
+
+    FINGER_CLOSED = [0.0, 0.0]
+    FINGER_OPEN = [0.05, 0.05]
+
+    HOME_POS_EASY = [
+        0.0,
+        -1.5,
+        0.0,
+        -np.pi,
+        -np.pi / 2.0,
+        0.0,
+        0.0,
+        0.0,
+    ]
+
+    HOME_POS_HARD = [
+        0.1,
+        1.32,
+        1.4,
+        -0.2,
+        1.72,
+        0.0,
+        1.66,
+        0.1,
+    ]
+
+    def __init__(
+        self,
+        model,
+        data=None,
+        visualize=False,
+        home_pose="default",
+        prefix="",
+    ):
+        """Initialize a Fetch arm.
+
+        Args:
+            model: Shared MuJoCo model.
+            data: Shared MuJoCo data.
+            visualize: Whether this wrapper should launch a viewer.
+            home_pose: Either ``"default"`` or ``"new"``.
+            prefix: Prefix applied to this Fetch instance's MJCF names,
+                such as ``"start_"`` or ``"goal_"``.
+        """
+
+        self.prefix = prefix
+
+        def prefixed(name):
+            return f"{self.prefix}{name}"
+
+        arm_joints = [
+            prefixed(joint_name)
+            for joint_name in self.ARM
+        ]
+
+        finger_joints = [
+            prefixed(joint_name)
+            for joint_name in self.FINGER
+        ]
+
+        MujocoRobot.__init__(
+            self,
+            model,
+            joint_names=arm_joints,
+            root_link=prefixed("base_link"),
+            data=data,
+            collision_geom_group=3,
+            ee_name=prefixed("attachment_site"),
+            visualize=visualize,
+        )
+
+        if home_pose == "default":
+            self.home_pos = self.HOME_POS_EASY.copy()
+
+        elif home_pose == "new":
+            self.home_pos = self.HOME_POS_HARD.copy()
+
+        else:
+            raise ValueError(
+                f"Unknown Fetch home pose: {home_pose!r}. "
+                "Expected 'default' or 'new'."
+            )
+
+        # Send only this Fetch instance to home.
+        self.set_joint_qpos(self.home_pos)
+
+        # Open only this Fetch instance's gripper.
+        for finger_name, finger_position in zip(
+            finger_joints,
+            self.FINGER_OPEN,
+        ):
+            joint_id = mujoco.mj_name2id(
+                model,
+                mujoco.mjtObj.mjOBJ_JOINT,
+                finger_name,
+            )
+
+            if joint_id == -1:
+                raise ValueError(
+                    f"Could not find Fetch finger joint: "
+                    f"{finger_name}"
+                )
+
+            qpos_address = model.jnt_qposadr[joint_id]
+
+            self.data.qpos[qpos_address] = float(
+                finger_position
+            )
+
+        mujoco.mj_forward(model, self.data)
 
 if __name__ == "__main__":
     # Test Panda
