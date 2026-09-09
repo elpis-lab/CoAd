@@ -2417,41 +2417,6 @@ class MujocoEnv:
             raise ValueError(
                 f"Unsupported object type: {self.object_details['type']}"
             )
-        
-    # def move_xml_object(self, object_name, object_pose, model, data):
-    #     """
-    #     Move cube_object to (x, y, z, yaw) by writing into its free joint qpos.
-    #     object_pose: iterable length-4: (x, y, z, yaw) in radians
-    #     """
-    #     if object_name == "microwave_object":
-    #         x, y, z, yaw = object_pose 
-
-    #         if model is None and data is None:
-    #             model = self.model
-    #             data = self.data
-
-    #         # jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "cube_object_free")
-    #         # qadr = self.model.jnt_qposadr[jid]
-    #         # vadr = self.model.jnt_dofadr[jid]
-
-    #         jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, f"{object_name}_free")
-    #         qadr = model.jnt_qposadr[jid]
-    #         vadr = model.jnt_dofadr[jid]
-
-    #         half = 0.5 * float(yaw)
-    #         qw = np.cos(half)
-    #         qx = 0.0
-    #         qy = 0.0
-    #         qz = np.sin(half)
-
-    #         # free joint qpos layout: [x y z qw qx qy qz]
-    #         data.qpos[qadr:qadr+7] = [x, y, z, qw, qx, qy, qz]
-    #         data.qvel[vadr:vadr+6] = 0.0
-
-    #         mujoco.mj_forward(model, data)
-
-    #     else:
-    #         raise ValueError(f"Unsupported XML object: {object_name}")
 
     def move_xml_object(
         self,
@@ -2544,37 +2509,6 @@ class MujocoEnv:
         data.qvel[vadr] = 0.0
 
         mujoco.mj_forward(model, data)
-
-    # def move_cube_object(self, object_pose, model=None, data=None):
-    #     """
-    #     Move cube_object to (x, y, z, yaw) by writing into its free joint qpos.
-    #     object_pose: iterable length-4: (x, y, z, yaw) in radians
-    #     """
-    #     x, y, z, yaw = object_pose 
-
-    #     if model is None and data is None:
-    #         model = self.model
-    #         data = self.data
-
-    #     # jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "cube_object_free")
-    #     # qadr = self.model.jnt_qposadr[jid]
-    #     # vadr = self.model.jnt_dofadr[jid]
-
-    #     jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "cube_object_free")
-    #     qadr = model.jnt_qposadr[jid]
-    #     vadr = model.jnt_dofadr[jid]
-
-    #     half = 0.5 * float(yaw)
-    #     qw = np.cos(half)
-    #     qx = 0.0
-    #     qy = 0.0
-    #     qz = np.sin(half)
-
-    #     # free joint qpos layout: [x y z qw qx qy qz]
-    #     data.qpos[qadr:qadr+7] = [x, y, z, qw, qx, qy, qz]
-    #     data.qvel[vadr:vadr+6] = 0.0
-
-    #     mujoco.mj_forward(model, data)
 
     def move_cube_object(self, object_pose, model=None, data=None):
         """
@@ -2775,79 +2709,6 @@ class MujocoEnv:
 
         return sv_xml
 
-    # def move_swept_volume(self, object_configs):
-    #     """Move swept volume to desired bin"""
-
-    #     dummy_config = [[1, 1], [1, 1], [0, 0], [0, 0]]
-
-    #     if isinstance(self, AllStableEnv):
-    #         face_in_contact = object_configs[0]
-    #         if face_in_contact == "xy":
-    #             sv_joint_name = "swept_volume_0_free"
-    #         elif face_in_contact == "yz":
-    #             sv_joint_name = "swept_volume_1_free"
-    #         elif face_in_contact == "zx":
-    #             sv_joint_name = "swept_volume_2_free"
-    #         else:
-    #             raise ValueError(f"Unknown face value: {face_in_contact}")
-    #         object_configs = object_configs[1:]
-    #     else:
-    #         sv_joint_name = "swept_volume_0_free"
-
-    #     # svid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "swept_volume_free")
-    #     svid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, sv_joint_name)
-
-    #     if svid == -1:
-    #         raise RuntimeError("Could not find joint swept_volume_free")
-
-    #     sv_adr = self.model.jnt_qposadr[svid]
-    #     sv_vadr = self.model.jnt_dofadr[svid]
-
-    #     object_configs = np.asarray(object_configs, dtype=np.float64)
-    #     if object_configs.ndim == 2:
-    #         object_configs = object_configs[None, :, :]
-
-    #     x_lower = object_configs[:, 0, 0]
-    #     x_upper = object_configs[:, 0, 1]
-    #     y_lower = object_configs[:, 1, 0]
-    #     y_upper = object_configs[:, 1, 1]
-    #     yaw_lower = object_configs[:, 3, 0]
-    #     yaw_upper = object_configs[:, 3, 1]
-
-    #     if isinstance(self, MicrowaveEnv):
-    #         # hid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "sv_door_hinge")
-
-    #         # if hid == -1:
-    #         #     raise RuntimeError("Could not find joint sv_door_hinge")
-            
-    #         joint_name = "sv_door_hinge"
-    #         door_lower = object_configs[:, 4, 0]
-    #         door_upper = object_configs[:, 4, 1]
-    #         door_ang = 0.5 * (door_lower + door_upper)
-
-    #         self.move_xml_joint(joint_name, door_ang[0])
-
-    #     z = object_configs[:, 2, 0] 
-
-    #     cx = 0.5 * (x_upper + x_lower)
-    #     cy = 0.5 * (y_upper + y_lower)
-    #     cyaw = 0.5 * (yaw_lower + yaw_upper)
-
-    #     new_pos = [cx[0], cy[0], z[0]]
-        
-    #     half = 0.5 * cyaw[0]
-    #     new_quat = [
-    #         np.cos(half),
-    #         0.0,
-    #         0.0,
-    #         np.sin(half),
-    #     ]
-    #     # new_quat = [1, 0, 0, 0]
-
-    #     self.data.qpos[sv_adr: sv_adr + 7] = [new_pos[0], new_pos[1], new_pos[2], new_quat[0], new_quat[1], new_quat[2], new_quat[3]]
-    #     self.data.qvel[sv_vadr: sv_vadr + 6] = 0
-
-    #     mujoco.mj_forward(self.model, self.data)
 
     def move_swept_volume(self, object_configs):
         """Move selected swept volume to desired bin, and dummy out unused SVs."""
@@ -2943,101 +2804,6 @@ class MujocoEnv:
 
         mujoco.mj_forward(self.model, self.data)
 
-    def initialize_TSR_parameters(self, robot, grasp_strategy="top", skip_generation=False):
-        if robot=="panda":
-            TSR_params = panda_TSR_parameters(self.object_details, self.yaw_buffer, self.alpha, grasp_strategy)
-        elif robot=="fetch":
-            TSR_params = fetch_TSR_parameters(self.object_details, self.yaw_buffer, self.alpha, grasp_strategy)
-        elif robot=="ur10":
-            TSR_params = ur10_TSR_parameters(self.object_details, self.yaw_buffer, self.alpha, grasp_strategy)
-
-        self.ee_offset, self.Bw, self.half_side, self.Tw2_w1, self.yaw_tw2_w1 = TSR_params
-        
-        
-        self.problem_details_grasp = {
-            "Bw": self.Bw,
-            "half_side": self.half_side,
-            "yaw_buffer": self.yaw_buffer,
-            "alpha": self.alpha,
-            "reachable_ws": self.object_outer_rad,
-            "robot_clearance": self.object_inner_rad,
-        }
-
-        if grasp_strategy == "front":
-            pass
-            p_nom = np.array([self.object_outer_rad, 0, 0])
-            from_robot_nom = p_nom - self.robot_pos
-            from_robot_nom[2] = 0.0
-            from_robot_nom /= np.linalg.norm(from_robot_nom) + 1e-12
-
-            yaw1 = -self.object_yaw
-            yaw2 = self.object_yaw
-            yaw_edges = np.arange(
-                yaw1, yaw2 + self.yaw_buffer, self.yaw_buffer
-            )
-            yaw_centers = (yaw_edges[:-1] + yaw_edges[1:]) * 0.5
-
-            # best_idx = np.zeros(len(yaw_centers), dtype=np.int64)
-            worst_idx = np.zeros(len(yaw_centers), dtype=np.int64)
-
-            z_axis = np.array([0.0, 0.0, 1.0])
-            Tews = self.ee_offset  # your 4 variants
-
-            for k, yaw in enumerate(yaw_centers):
-                # nominal obj rotation about world Z
-                cy, sy = np.cos(yaw), np.sin(yaw)
-                Rwo = np.array(
-                    [[cy, -sy, 0.0], [sy, cy, 0.0], [0.0, 0.0, 1.0]],
-                    dtype=float,
-                )
-
-                # best_s = -float("inf")
-                # best_i = 0
-                worst_s = float("inf")
-                worst_i = 0
-
-                for i, Tew in enumerate(Tews):
-                    Rwe = Rwo @ Tew[:3, :3]
-                    approach = Rwe @ z_axis
-                    approach[2] = 0.0
-                    na = np.linalg.norm(approach)
-                    if na > 1e-12:
-                        approach /= na
-
-                    s = float(np.dot(approach, from_robot_nom))
-                    # if s > best_s:
-                    #    best_s = s
-                    #    best_i = i
-                    if s < worst_s:
-                        worst_s = s
-                        worst_i = i
-
-                # best_idx[k] = best_i
-                worst_idx[k] = worst_i
-
-            self.yaw_edges = yaw_edges
-            # self.best_ee_offset_idx = best_idx
-            self.worst_ee_offset_idx = worst_idx
-
-        else:
-
-            self.yaw_edges = None
-            self.worst_ee_offset_idx = None
-
-        self.problem_details = {
-            f"{grasp_strategy}": self.problem_details_grasp
-        }
-        self.yaw_tw2_w1_dict = {f"{grasp_strategy}": self.yaw_tw2_w1}
-        sv_config = [
-            [0, round(self.yaw_tw2_w1[0], 5)],
-            [0, round(self.yaw_tw2_w1[1], 5)],
-            [
-                round(self.object_details["position"][2], 5),
-                round(self.object_details["position"][2], 5),
-            ],
-            [0, round(self.Tw2_w1[3], 5)],
-        ]
-        return sv_config
 
     def find_problem_intervals(self, scene_yaml, base_name="base", wall_clearance=0.18):
         """Find x,y intervals for valid object positions in problem"""
@@ -3096,24 +2862,6 @@ class MujocoEnv:
 
         TCR_set = create_TCR_set(self)
         self.task_set = TCR_set
-        return self.task_set
-
-        yaw_iTSR_set, _ = find_yaw_iTSR_set(
-            self.object_details, 
-            self.problem_details, 
-            self.Tw2_w1
-        )
-
-        iTSR_set, _ = find_iTSR_set(
-            self.object_details, 
-            self.problem_details, 
-            self.yaw_tw2_w1_dict, 
-            yaw_iTSR_set, 
-            problem=self.problem, 
-            robot_pos=self.robot_pos
-        )
-
-        self.task_set = iTSR_set[0]
         return self.task_set
 
 
@@ -3235,38 +2983,6 @@ class BoxEnv(MujocoEnv):
         super().populate_grasp_details(yaw_buffer=yaw_buffer, grasp_type="top")
         tcr_intervals = super().construct_tcr()
 
-        # # Find valid x,y intervals for object placements in problem
-        # box_thickness = 0.18
-        # box_intervals = super().find_problem_intervals(base_name="base", wall_clearance=box_thickness)
-        # self.problem = {
-        #     'name': "box",
-        #     'intervals': box_intervals,
-        #     'robot': f"{robot}"   
-        # }
-
-        # # Annulus of object positions
-        # self.object_inner_rad = 0.3
-        # self.object_outer_rad = 0.75
-        # self.object_yaw = 0.25*np.pi #-yaw to +yaw
-        # self.object_details['dist'] = [
-        #     self.object_outer_rad, self.object_outer_rad, 0, self.object_yaw
-        # ]
-        # # Find TSR parameters
-        # sv_config = super().initialize_TSR_parameters(robot, grasp_strategy="top")
-        
-        # # Add environment xmls and build model
-        # #sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config)
-        # if no_sv==False:
-        #     sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config)
-        # else:
-        #     sv_xml = super().cube_object_xml(self.object_details['size'], [1, 1, 0, 0])
-        # box_xml = super().build_xml(parent_body_name="scene_box", skip_ids={"Can1"})
-        
-        # xmls_to_add = [sv_xml, box_xml]
-        # free_xml_path = f"{self.robot_dir}/box_scene.xml"
-        # self.model, self.data = super().build_model(free_xml_path, xmls_to_add)
-
-        # Prepare swept volume (or object geom for validation)
         xmls_to_add = []
         if using_swept_volume:
             xml = super().create_swept_volume(tcr_intervals)
@@ -3415,115 +3131,6 @@ class TableEnv(MujocoEnv):
 
 class ShelfEnv(MujocoEnv):
     """Thin shelf environment"""
-
-    # def __init__(self, robot, no_sv=False):
-    #     """Initialize thin shelf environment"""
-    #     super().__init__(robot)
-
-    #     # Problem parameters
-    #     object_type = "box"
-    #     object_size = [0.03, 0.03, 0.15]
-    #     yaw_variation = [-0.5*np.pi, 0.5*np.pi]
-    #     yaw_buffer = 6*(np.pi/180)
-
-    #     # Prepare target object        
-    #     object_variation = {
-    #         'x': [[-0.8, 0.8]],
-    #         'y': [[-0.8, 0.8]],
-    #         'z': [[object_size[2]/2, object_size[2]/2]],
-    #         'yaw': [yaw_variation]
-    #     }
-    #     super().populate_object_details(object_type, object_size, object_variation)
-
-    #     # Prepare environment details
-    #     if robot=="panda":
-    #         config_yaml = "configs/problems/bookshelf_thin_panda.yaml"
-    #     elif robot=="fetch":
-    #         config_yaml = "configs/problems/bookshelf_thin_fetch.yaml"
-    #     elif robot=="ur10":
-    #         config_yaml = "configs/problems/bookshelf_thin_ur5.yaml"
-        
-    #     scene_yaml = "configs/scenes/bookshelf/scene_thin.yaml"
-    #     with open(config_yaml, "r") as f:
-    #         config_yaml_data = yaml.safe_load(f)
-        
-    #     robot_pos = config_yaml_data['base_offset']['position']
-    #     robot_quat = super().quat_xyzw_to_wxyz(config_yaml_data['base_offset']['orientation'])
-
-    #     if robot == "panda":
-    #         inner_rad = 0.3
-    #         outer_rad = 0.75
-    #     elif robot == "fetch":
-    #         inner_rad = 0.3
-    #         outer_rad = 0.75
-    #     elif robot == "ur10":
-    #         inner_rad = 0.3
-    #         #self.object_outer_rad = 1.1
-    #         outer_rad = 0.65
-
-    #     super().populate_env_details(scene_yaml, robot, "shelf", robot_pos, robot_quat, outer_rad, inner_rad)
-
-    #     # Prepare grasp details
-    #     super().populate_grasp_details(yaw_buffer=yaw_buffer, grasp_type="front")
-    #     tcr_intervals = super().construct_tcr()
-
-    #     # shelf_thickness = 0.18
-    #     shelf_thickness = 0.12
-    #     dividing_wall_thickness = 0.14
-    #     # bases = ['shelf_bottom', 'shelf_middle_bottom', 'shelf_middle', 'shelf_middle_top', 'shelf_top']
-    #     bases = ["shelf_middle"]
-    #     shelf_intervals = self.find_problem_intervals(
-    #         bases, shelf_thickness, dividing_wall_thickness
-    #     )
-    #     self.problem = {
-    #         "name": "shelf",
-    #         "intervals": shelf_intervals,
-    #         "robot": f"{robot}",
-    #     }
-    #     # Annulus of object positions
-    #     if robot == "panda":
-    #         self.object_inner_rad = 0.3
-    #         self.object_outer_rad = 0.75
-    #     elif robot == "fetch":
-    #         self.object_inner_rad = 0.3
-    #         self.object_outer_rad = 0.75
-    #     elif robot == "ur10":
-    #         self.object_inner_rad = 0.3
-    #         # self.object_outer_rad = 1.1
-    #         self.object_outer_rad = 0.65
-
-    #         # self.robot_pos[0] = self.robot_pos[0]-0.8
-
-    #     self.object_yaw = 0.01 * np.pi  # -yaw to +yaw
-    #     self.object_details["dist"] = [
-    #         self.object_outer_rad,
-    #         self.object_outer_rad,
-    #         0,
-    #         self.object_yaw,
-    #     ]
-    #     # Find TSR parameters
-    #     sv_config = super().initialize_TSR_parameters(
-    #         robot, grasp_strategy="front"
-    #     )
-
-    #     # Add environment xmls and build model
-    #     # sv_xml = super().cube_swept_volume_xml(self.object_details['size'], sv_config)
-    #     if no_sv == False:
-    #         sv_xml = super().cube_swept_volume_xml(
-    #             self.object_details["size"], sv_config
-    #         )
-    #     else:
-    #         sv_xml = super().cube_object_xml(
-    #             self.object_details["size"], [1, 1, 0, 0]
-    #         )
-    #     shelf_xml = super().build_xml(
-    #         parent_body_name="scene_shelf", skip_ids={"Cube1"}
-    #     )
-
-    #     xmls_to_add = [sv_xml, shelf_xml]
-    #     free_xml_path = f"{self.robot_dir}/shelf_scene.xml"
-    #     self.model, self.data = super().build_model(free_xml_path, xmls_to_add)
-
     def __init__(self, robot, using_swept_volume=True):
         """Initialize the thin shelf environment."""
         super().__init__(robot)
