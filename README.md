@@ -144,7 +144,9 @@ python experiments/benchmark_adaptations.py
 
 #### Benchmark with baselines
 ```
-bash experiments/run_benchmarks.sh
+bash experiments/run_planning.sh
 ```
+
+See [experiments/README.md](experiments/README.md) for method selection, summaries, plots, and visualization.
 
 For detailed analysis and comparison, please refer to our paper.
