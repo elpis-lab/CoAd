@@ -45,6 +45,8 @@ def _initialize_condensation_worker(
         visualize=False,
     )
 
+    _WORKER_ENV.load_tcr_metadata(f"data/{env_name}_{robot_name}/task_set.tcr.json")
+
     ik_solver = get_ik_solver(
         _WORKER_ROBOT,
         env_collision_geoms=_WORKER_ENV.env_details["collision_geoms"],

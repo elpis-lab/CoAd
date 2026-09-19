@@ -4,16 +4,21 @@ import os
 import numpy as np
 import yaml
 import itertools
-from geometry.pose import Pose, matrix_to_flat
-from coad.mink_ik import get_ik_solver
-from coad.mujoco_utils import sample_qpos
-from coad.robot import Panda, UR10, FetchArm, G1
-from coad.tcr_deprecated import (
-    create_TCR_set,
-    make_Tew_yaw_variants,
+from geometry.pose import Pose, matrix_to_flat, flat_to_matrix
+from coad.tcr import (
+    TSRBounds,
+    calibrate_bounds,
+    inner_halfwidths,
+    microwave_radii,
+    goal_fits_cell,
+    create_tcr_set,
+    make_tew_yaw_variants,
     translational_half_extents,
     valid_grasp_yaw_offsets,
 )
+from coad.mink_ik import get_ik_solver
+from coad.mujoco_utils import sample_qpos
+from coad.robot import Panda, UR10, FetchArm, G1
 
 
 class TaskRegions:
@@ -82,7 +87,7 @@ class TaskRegions:
                 # Existing box logic begins here.
 
                 yaw_angles, x_fits, y_fits = valid_grasp_yaw_offsets(
-                    self.object_details,
+                    {**self.object_details, "size": [sx, sy, sz]},
                     2.0 * half_finger_clearance,
                 )
                 if self.environment_name == "table":
@@ -90,7 +95,7 @@ class TaskRegions:
                 else:
                     offsets = [0.0, np.pi]
 
-                Tews = make_Tew_yaw_variants(Tew, offsets)
+                Tews = make_tew_yaw_variants(Tew, offsets)
 
                 clearance_size_x = sx
                 clearance_size_y = sy
@@ -182,8 +187,8 @@ class TaskRegions:
             if self.environment_name == "microwave":
                 offsets = [0.0]
 
-            Tews = make_Tew_yaw_variants(Tew, offsets)
-            Tews2 = make_Tew_yaw_variants(Tew2, offsets)
+            Tews = make_tew_yaw_variants(Tew, offsets)
+            Tews2 = make_tew_yaw_variants(Tew2, offsets)
             # pprint(f"Tews: {Tews}")
             # pprint(f"Tews2: {Tews2}")
 
@@ -225,7 +230,29 @@ class TaskRegions:
         self.grasp_details["ee_offsets"] = Tews
         return del_geom_x, del_geom_y
 
-    def construct_tcr(self, min_contact_overlap=0.01):
+    def construct_tcr(
+        self, min_contact_overlap=0.01, tsr_bounds=None, planar_shape="compatible"
+    ):
+        """Derive analytic inner cells, retaining historical sizes by default.
+
+        The old nominal collision sampling only calibrates preferred dimensions.
+        It is not a certificate. Each actual goal is checked against a continuous
+        cell enclosure. Pass TSRBounds (or face -> TSRBounds) to impose independent
+        task tolerances; planar_shape="square" uses the paper's equal xy widths.
+        """
+        if planar_shape not in {"compatible", "square"}:
+            raise ValueError("planar_shape must be compatible or square")
+        self.grasp_details["tcr_metadata"] = {
+            "version": 2,
+            "planar_shape": planar_shape,
+            "environment": self.environment_name,
+            "robot": self.env_details["robot"],
+            "bounds_source": (
+                "compatibility_calibration" if tsr_bounds is None else "explicit"
+            ),
+            "cells": {},
+        }
+        self.grasp_details["ee_offsets_by_face"] = {}
 
         yaw_buffer = self.grasp_details["yaw_buffer"]
         alpha = self.grasp_details["alpha"]
@@ -288,9 +315,9 @@ class TaskRegions:
                 sx, sy, sz = map(float, self.object_details["size"])
 
                 if tcr_batch_idx == 1:
-                    sx, sy, sz = sz, sx, sy
-                elif tcr_batch_idx == 2:
                     sx, sy, sz = sy, sz, sx
+                elif tcr_batch_idx == 2:
+                    sx, sy, sz = sz, sx, sy
 
             elif self.object_details["type"] == "microwave":
                 # Use door dimensions
@@ -341,9 +368,82 @@ class TaskRegions:
                 ).tolist()
 
             Tews = self.grasp_details["ee_offsets"]
-            tcr_intervals = self.find_tcr_intervals(
-                initial_tcr_intervals, Tews, contact_face
+            if env_name == "microwave" or tsr_bounds is not None:
+                # A nominal IK search can fail even when other cells are usable.
+                # Articulated cells now use the analytic hinge bound directly.
+                tcr_intervals = dict(initial_tcr_intervals)
+                tcr_intervals["z"] = [
+                    (
+                        self.object_details["size"][2] / 2
+                        if env_name == "microwave"
+                        else sz / 2
+                    )
+                ]
+                calibration = (
+                    "analytic_hinge" if env_name == "microwave" else "explicit_bounds"
+                )
+                if self.object_details["type"] == "cylinder":
+                    tcr_intervals["yaw"] = [0.0]
+                if (
+                    env_name == "microwave"
+                    and "hinge_pos_body" not in self.object_details
+                ):
+                    self.object_xml(
+                        self.object_details["size"], [0, 0, 0, 0], temp=True
+                    )
+            else:
+                try:
+                    tcr_intervals = self.find_tcr_intervals(
+                        initial_tcr_intervals, Tews, contact_face
+                    )
+                    calibration = "nominal_samples"
+                except ValueError as error:
+                    if str(error) != "Unable to find IK solution":
+                        raise
+                    # Nominal reachability is not a precondition for an analytic
+                    # grid. No goals are accepted without the per-cell checks.
+                    tcr_intervals = dict(initial_tcr_intervals, z=[sz / 2])
+                    if self.object_details["type"] == "cylinder":
+                        tcr_intervals["yaw"] = [0.0]
+                    calibration = "initial_preference_no_nominal_solution"
+
+            # Keep the nominal sampled calibration only as a compatibility
+            # preference; now derive dimensions from an explicit TSR contract.
+            half = np.array(
+                [
+                    (max(tcr_intervals.get(d, [0])) - min(tcr_intervals.get(d, [0])))
+                    / 2
+                    for d in ("x", "y", "z", "yaw", "door")
+                ]
             )
+            radii = (
+                microwave_radii(self.object_details)
+                if env_name == "microwave"
+                else None
+            )
+            bounds = tsr_bounds
+            if isinstance(bounds, dict):
+                bounds = bounds[contact_face or "default"]
+            if bounds is None:
+                bounds = calibrate_bounds(half, radii)
+            aspect = half[:2] if planar_shape == "compatible" else (1.0, 1.0)
+            derived = inner_halfwidths(bounds, half[3], half[4], aspect, radii)
+            for dimension, h in zip(("x", "y", "z", "yaw", "door"), derived):
+                if dimension in tcr_intervals and (dimension != "z" or h > 0):
+                    tcr_intervals[dimension] = (
+                        [-float(h), 0.0, float(h)] if h else [0.0]
+                    )
+            face_key = contact_face or "default"
+            self.grasp_details["tcr_metadata"]["cells"][face_key] = {
+                "tsr_bounds": bounds.to_dict(),
+                "calibration": calibration,
+                "preferred_halfwidths": half.tolist(),
+                "halfwidths": derived.tolist(),
+                "ee_offsets": [offset.tolist() for offset in Tews],
+            }
+            self.grasp_details["ee_offsets_by_face"][face_key] = [
+                offset.copy() for offset in Tews
+            ]
 
             if tcr_batches is None:
                 self.grasp_details["tcr_intervals"] = tcr_intervals
@@ -353,6 +453,39 @@ class TaskRegions:
 
         self.grasp_details["tcr_intervals"] = tcr_intervals_batches
         return tcr_intervals_batches
+
+    def configure_tcr_grid(self, planar_shape="compatible", cell_scale=1.0):
+        """Choose square cells or uniformly refine; keep TSR tolerances fixed.
+
+        Refining the whole grid preserves coverage. Shrinking individual cells
+        while keeping their original keys would leave unrepresented gaps.
+        """
+        if planar_shape not in {"compatible", "square"} or not 0 < cell_scale <= 1:
+            raise ValueError("Expected compatible/square shape and 0 < cell_scale <= 1")
+        metadata = self.grasp_details["tcr_metadata"]
+        radii = (
+            microwave_radii(self.object_details)
+            if self.environment_name == "microwave"
+            else None
+        )
+        for face, cell in metadata["cells"].items():
+            old = np.asarray(cell["halfwidths"])
+            if planar_shape == "square":
+                half = inner_halfwidths(
+                    TSRBounds(**cell["tsr_bounds"]), old[3], old[4], radii=radii
+                )
+            else:
+                half = old.copy()
+            half *= cell_scale
+            intervals = self.grasp_details["tcr_intervals"]
+            if face != "default":
+                intervals = intervals[face]
+            for dim, h in zip(("x", "y", "z", "yaw", "door"), half):
+                if dim in intervals and (dim != "z" or h > 0):
+                    intervals[dim] = [-float(h), 0.0, float(h)] if h else [0.0]
+            cell["halfwidths"] = half.tolist()
+        metadata["planar_shape"] = planar_shape
+        metadata["cell_scale"] = cell_scale
 
     def sample_tcr_intervals(self, intervals):
         dimensions = list(intervals)
@@ -565,7 +698,7 @@ class TaskRegions:
 
         cleared = False
 
-        while not cleared:
+        for refinement in range(100):
             collision_found = False
 
             for sample in self.sample_tcr_intervals(current_intervals):
@@ -634,6 +767,9 @@ class TaskRegions:
                 }
             else:
                 cleared = True
+                break
+        if not cleared:
+            raise RuntimeError("Nominal TCR calibration failed after 100 reductions")
 
         tcr_intervals = {
             dimension: values for dimension, values in current_intervals.items()
@@ -648,6 +784,67 @@ class TaskRegions:
             input()
             tempRobot.close()
         return tcr_intervals
+
+    def validate_cell_goal(self, robot, q):
+        """Recheck endpoints after IK refinement or trajectory adaptation."""
+        if not hasattr(self, "current_tcr_key"):
+            return False
+        key = self.current_tcr_key
+        face = key[0] if self.environment_name == "allstable" else "default"
+        robot.set_joint_qpos(q)
+        if not self.goal_clears_cell(robot):
+            return False
+        actual_ee = flat_to_matrix(robot.get_ee_pose())
+        return any(
+            self.goal_satisfies_tsr(key, actual_ee, offset)
+            for offset in self.grasp_details["ee_offsets_by_face"][face]
+        )
+
+    def goal_clears_cell(self, robot):
+        """Strict collision check of the fixed goal against the enclosure."""
+        return not any(
+            contact.dist <= 0
+            and (
+                contact.geom1 in robot.robot_geoms or contact.geom2 in robot.robot_geoms
+            )
+            for contact in self.data.contact[: self.data.ncon]
+        )
+
+    def load_tcr_metadata(self, path):
+        """Restore the task set's contract, independently of worker RNG seeds."""
+        import json
+        from pathlib import Path
+
+        path = Path(path)
+        if not path.exists():
+            return False  # Historical datasets keep their original file format.
+        metadata = json.loads(path.read_text())
+        if metadata.get("version") != 2:
+            raise ValueError("Unsupported task-region metadata version")
+        if (
+            metadata.get("environment") != self.environment_name
+            or metadata.get("robot") != self.env_details["robot"]
+        ):
+            raise ValueError(
+                "Task-region metadata belongs to another environment/robot"
+            )
+        self.grasp_details["tcr_metadata"] = metadata
+        self.grasp_details["ee_offsets_by_face"] = {
+            face: [np.asarray(offset) for offset in cell["ee_offsets"]]
+            for face, cell in metadata["cells"].items()
+        }
+        return True
+
+    def goal_satisfies_tsr(self, key, actual_ee, offset):
+        """Check actual IK output against the analytic contract for this cell."""
+        if self.environment_name == "allstable":
+            face, numeric_key = key[0], key[1:]
+        else:
+            face, numeric_key = "default", key
+        metadata = self.grasp_details["tcr_metadata"]["cells"][face]
+        bounds = TSRBounds(**metadata["tsr_bounds"])
+        details = self.object_details if self.environment_name == "microwave" else None
+        return goal_fits_cell(bounds, numeric_key, actual_ee, offset, details)
 
     def find_problem_intervals(self, scene_yaml, base_name="base", wall_clearance=0.18):
         """Find x,y intervals for valid object positions in problem"""
@@ -698,6 +895,6 @@ class TaskRegions:
     def generate_task_set(self):
         """Generate task set/TSRs"""
 
-        TCR_set = create_TCR_set(self)
+        TCR_set = create_tcr_set(self)
         self.task_set = TCR_set
         return self.task_set

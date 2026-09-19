@@ -5,6 +5,7 @@ import argparse
 import time
 import numpy as np
 import pickle
+import json
 from tqdm import tqdm
 
 from coad.utils import set_seed, load_env_and_robot, get_data_folder
@@ -26,6 +27,8 @@ def main(args):
     # Load environment and robot
     env, robot = load_env_and_robot(args.env, args.robot, False)
 
+    env.configure_tcr_grid(args.planar_shape, args.cell_scale)
+
     # Solve task set
     task_set = env.generate_task_set()
     print(f"Length of task set: {len(task_set)}")
@@ -33,6 +36,8 @@ def main(args):
     # Save task set
     os.makedirs(folder, exist_ok=True)
     pickle.dump(task_set, open(f"{folder}/task_set.pkl", "wb"))
+    with open(f"{folder}/task_set.tcr.json", "w") as file:
+        json.dump(env.grasp_details["tcr_metadata"], file, indent=2)
     robot.close()
 
 
@@ -41,7 +46,20 @@ def parse_arguments():
     # envs
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument(
-        "--env", choices=[
+        "--planar-shape",
+        choices=["compatible", "square"],
+        default="compatible",
+        help="Preserve historical aspect ratios or use the paper's square cells",
+    )
+    parser.add_argument(
+        "--cell-scale",
+        type=float,
+        default=1.0,
+        help="Uniform grid refinement factor in (0, 1]; TSR bounds stay fixed",
+    )
+    parser.add_argument(
+        "--env",
+        choices=[
             "table",
             "box",
             "cage",
@@ -51,14 +69,12 @@ def parse_arguments():
             "largeobj",
             "microwave",
             "allstable",
-            "conveyor"], default="table"
+            "conveyor",
+        ],
+        default="table",
     )
     parser.add_argument(
-        "--robot", choices=[
-            "panda",
-            "ur10",
-            "fetch",
-            "g1"], default="panda"
+        "--robot", choices=["panda", "ur10", "fetch", "g1"], default="panda"
     )
 
     args = parser.parse_args()

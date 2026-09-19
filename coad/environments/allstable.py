@@ -2,7 +2,7 @@
 
 import numpy as np
 import yaml
-from coad.tcr_deprecated import create_TCR_set
+from coad.tcr import create_tcr_set
 from .base import MujocoEnv
 
 
@@ -131,7 +131,7 @@ class AllStableEnv(MujocoEnv):
             TCR_set.update(
                 {
                     (face_in_contact,) + key: value
-                    for key, value in create_TCR_set(
+                    for key, value in create_tcr_set(
                         self, batch_idx=face_in_contact
                     ).items()
                 }

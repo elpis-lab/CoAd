@@ -53,6 +53,11 @@ class Adapter:
 
     def path_validity_check(self, path):
         """Check validity of the whole path"""
+        if len(path) == 0:
+            return False
+        env = getattr(self.robot, "tcr_env", None)
+        if env is not None and not env.validate_cell_goal(self.robot, path[-1]):
+            return False
         for i in range(len(path) - 1):
             q1 = path[i]
             q2 = path[i + 1]
@@ -72,6 +77,9 @@ class Adapter:
         reached, new_goal_joint = self.ik_solver.solve(
             target, current=ref_joint, use_col=False
         )
+        env = getattr(self.robot, "tcr_env", None)
+        if reached and env is not None and not env.validate_cell_goal(self.robot, new_goal_joint):
+            return False, curr_goal_joint
         return reached, new_goal_joint
 
 

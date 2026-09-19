@@ -387,6 +387,7 @@ def main(args):
 
     # Load environment and robot
     env, robot = load_env_and_robot(args.env, args.robot, visualize=True)
+    env.load_tcr_metadata(f"data/{env.environment_name}_{env.env_details['robot']}/task_set.tcr.json")
 
     # Solve problems
     # Load the joint space problem set

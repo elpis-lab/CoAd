@@ -113,7 +113,14 @@ def library_paths(args, method):
 
 def load_library(args, method):
     roots_path, map_path = library_paths(args, method)
-    return read_pickle(roots_path), read_pickle(map_path)
+    roots, mapping = read_pickle(roots_path), read_pickle(map_path)
+    # Equal-length paths saved with dtype=object can also give their endpoint
+    # arrays object dtype. Normalize in memory without rewriting the dataset.
+    mapping = {
+        key: (root_id, None if goal is None else np.asarray(goal, dtype=float))
+        for key, (root_id, goal) in mapping.items()
+    }
+    return roots, mapping
 
 
 def usable_keys(roots, mapping, *, allow_empty=False):
@@ -157,7 +164,8 @@ def load_full_paths(args):
     if len(keys) != len(paths):
         raise ValueError("Task-path keys and data have different lengths")
     return {
-        key: path for key, path in zip(keys, paths) if path is not None and len(path)
+        key: np.asarray(path, dtype=float)
+        for key, path in zip(keys, paths) if path is not None and len(path)
     }
 
 

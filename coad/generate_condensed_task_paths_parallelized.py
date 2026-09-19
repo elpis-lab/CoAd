@@ -64,6 +64,7 @@ def _initialize_condensation_worker(
         robot_name,
         False,
     )
+    _WORKER_ENV.load_tcr_metadata(f"data/{env_name}_{robot_name}/task_set.tcr.json")
 
     _WORKER_HOME_QPOS = _WORKER_ROBOT.get_joint_qpos().copy()
     _WORKER_JOINT_GOAL_SET = joint_goal_set
@@ -582,6 +583,7 @@ def main(args):
 
     # Load environment and robot
     env, robot = load_env_and_robot(args.env, args.robot, False)
+    env.load_tcr_metadata(f"data/{env.environment_name}_{env.env_details['robot']}/task_set.tcr.json")
 
     # Solve problems
     # Load the joint space problem set

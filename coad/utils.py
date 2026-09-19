@@ -99,4 +99,6 @@ def load_env_and_robot(
     if hasattr(env, "home_qpos"):
         robot.set_joint_qpos(env.home_qpos)
         robot.home_pos = env.home_qpos.copy()
+    if using_swept_volume:
+        robot.tcr_env = env
     return env, robot

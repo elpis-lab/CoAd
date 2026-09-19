@@ -26,6 +26,7 @@ def validate_path(planner, path, start, goal):
     if path is None:
         return False
     points = np.asarray(path, dtype=float)
+    start, goal = np.asarray(start, dtype=float), np.asarray(goal, dtype=float)
     if (
         points.ndim != 2
         or points.shape[1] != len(start)
@@ -197,6 +198,7 @@ class Benchmark:
         self.robot.set_joint_qpos(self.home)
         begin = time.perf_counter()
         path = None
+        goal = np.asarray(goal, dtype=float)
         target = goal
         if method in self.adapters:
             adapter, index = self.adapters[method]

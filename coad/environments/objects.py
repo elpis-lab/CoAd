@@ -110,11 +110,7 @@ class SceneObjects:
 
         rpy = Rotation.from_matrix(R).as_euler("xyz", degrees=False)
 
-        if geom_name == "microwave_handle_sv":
-            rpy = np.array([rpy[0], rpy[1], rpy[2] - np.pi / 2])
-            rot_mat = Rotation.from_euler("xyz", rpy, degrees=False).as_matrix()
-        else:
-            rot_mat = R
+        rot_mat = R
 
         if not as_matrix:
             return pos, rpy

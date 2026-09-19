@@ -100,7 +100,7 @@ def build_library(
         key_center = (key_arr[:, 0] + key_arr[:, 1]) / 2
         neighbor_indices = nn.query(
             [key_center],
-            k=n_neighbors + 1,  # +1 for the center itself
+            k=min(n_neighbors + 1, nn.data.shape[0]),  # Include the center
             return_distance=True,
             sort_results=True,
         )[1][0]
@@ -116,7 +116,7 @@ def build_library(
             # Try to compress neighbor into this root.
             t0 = time.perf_counter()
             valid, q_nb_end = adapter.compress(
-                adapted_center, [joint_goal_set[nb_key]]
+                adapted_center, np.asarray(joint_goal_set[nb_key], dtype=float)
             )
             t1 = time.perf_counter()
 
@@ -171,6 +171,7 @@ def main(args):
 
     # Load environment and robot
     env, robot = load_env_and_robot(args.env, args.robot)
+    env.load_tcr_metadata(f"data/{env.environment_name}_{env.env_details['robot']}/task_set.tcr.json")
 
     # Solve problems
     # Load the joint space problem set

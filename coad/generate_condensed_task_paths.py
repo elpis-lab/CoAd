@@ -240,7 +240,7 @@ def solve_joint_goal_set_condensed(
         key_center = (key_arr[:, 0] + key_arr[:, 1]) / 2
         neighbor_indices = nn.query(
             [key_center],
-            k=n_neighbors + 1,  # +1 for the center itself
+            k=min(n_neighbors + 1, nn.data.shape[0]),  # Include the center
             return_distance=True,
             sort_results=True,
         )[1][0]
@@ -419,7 +419,7 @@ def condense_dataset(
         key_center = (key_arr[:, 0] + key_arr[:, 1]) / 2
         neighbor_indices = nn.query(
             [key_center],
-            k=n_neighbors + 1,  # +1 for the center itself
+            k=min(n_neighbors + 1, nn.data.shape[0]),  # Include the center
             return_distance=True,
             sort_results=True,
         )[1][0]
@@ -499,6 +499,7 @@ def main(args):
 
     # Load environment and robot
     env, robot = load_env_and_robot(args.env, args.robot, False)
+    env.load_tcr_metadata(f"data/{env.environment_name}_{env.env_details['robot']}/task_set.tcr.json")
 
     # Solve problems
     # Load the joint space problem set

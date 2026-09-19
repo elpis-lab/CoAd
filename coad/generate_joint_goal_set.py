@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from coad.env import MujocoEnv
 from coad.robot import MujocoRobot
-from geometry.pose import Pose, matrix_to_flat, wrap_to_pi
+from geometry.pose import Pose, matrix_to_flat, wrap_to_pi, flat_to_matrix
 from coad.utils import set_seed, load_env_and_robot, get_data_folder
 from coad.task_space import build_task_nn, key_to_center, split_key, has_contact_face
 from coad.mink_ik import get_ik_solver
@@ -216,7 +216,6 @@ def convert_task_to_joint_goal(
         #     print(f"key: {key}")
 
         original_key = key
-        env.move_swept_volume(original_key)
 
         if has_contact_face(env):
             face, numeric_key = split_key(original_key)
@@ -232,7 +231,8 @@ def convert_task_to_joint_goal(
         else:
             obj_pose = Pose(key_center[:3], (0, 0, key_center[3])).matrix()
 
-        ee_offsets = env.grasp_details['ee_offsets'].copy()
+        face_key = face if has_contact_face(env) else "default"
+        ee_offsets = env.grasp_details['ee_offsets_by_face'][face_key]
         # print(f"ee_offsets: {ee_offsets}")
         
         # multiple potential ee targets
@@ -244,19 +244,21 @@ def convert_task_to_joint_goal(
         # Start solving IK
         t0 = time.perf_counter()
         valid_ik = False
-        for target in targets:
+        for target, offset in zip(targets, ee_offsets):
             for target_attempts in range(n_target_attempts):
                 # Solve IK
                 reference = get_ik_reference(
                     robot, key, target_attempts, ik_method, **method_args
                 )
                 reached, solution = ik_solver.solve(
-                    target, reference, use_col=use_col
+                    target, reference, use_col=use_col, pos_tol=1e-4, rot_tol=1e-3
                 )
 
                 if reached:
                     robot.set_joint_qpos(solution)
-                    if not robot.in_contact():
+                    if (env.goal_clears_cell(robot) and env.goal_satisfies_tsr(
+                        original_key, flat_to_matrix(robot.get_ee_pose()), offset
+                    )):
                         valid_ik = True
                         break
             if valid_ik:
@@ -316,6 +318,8 @@ def main(args):
         )
         robot.close()
         return
+
+    env.load_tcr_metadata(f"{folder}/task_set.tcr.json")
 
     # Convert task set to joint goal set
     joint_goal_set, results = convert_task_to_joint_goal(

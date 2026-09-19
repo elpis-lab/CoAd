@@ -55,6 +55,7 @@ def _initialize_library_worker(
         robot_name,
         visualize=False,
     )
+    _WORKER_ENV.load_tcr_metadata(f"data/{env_name}_{robot_name}/task_set.tcr.json")
     _WORKER_HOME_QPOS = _WORKER_ROBOT.get_joint_qpos().copy()
     _WORKER_PLANNER_NAME = planner_name
 

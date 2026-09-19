@@ -1,3 +1,8 @@
+"""Historical TCR experiments, retained for reference only.
+
+New generation uses coad.tcr (analytic contracts and tiling).
+The sampled/heuristic regions below are not whole-cell TSR certificates.
+"""
 import numpy as np
 from tqdm import tqdm
 import itertools
@@ -11,7 +16,7 @@ import itertools
 
 
 
-def find_TSR_HMat(xyz, yaw):
+def find_tsr_hmat(xyz, yaw):
     TSR_HMat = np.eye(4)
     TSR_HMat[0, 0] = np.cos(yaw)
     TSR_HMat[0, 1] = -np.sin(yaw)
@@ -39,7 +44,7 @@ def xy_half_extents(half_side):
     return float(half_side), float(half_side)
 
 
-def find_TSR_Bounds(Bw, TSR_HMat1, yaw_1, yaw_2, yaw_buffer, half_side, grasp):
+def find_tsr_bounds(Bw, TSR_HMat1, yaw_1, yaw_2, yaw_buffer, half_side, grasp):
     tw1_0 = TSR_HMat1[:3, 3]
     x_half, y_half = xy_half_extents(half_side)
 
@@ -69,7 +74,7 @@ def find_TSR_Bounds(Bw, TSR_HMat1, yaw_1, yaw_2, yaw_buffer, half_side, grasp):
     return B
 
 
-def find_B0_intersection(B1_0, B2_0):
+def find_b0_intersection(B1_0, B2_0):
     # x
     xmin = max(B1_0[0, 0], B2_0[0, 0])
     xmax = min(B1_0[0, 1], B2_0[0, 1])
@@ -274,7 +279,7 @@ def rmin_rmax_from_box_corners(tw1, tw2, nominal_pose=(0.0, 0.0, 0.0)):
     return r_min, r_max
 
 
-def Tz(theta):
+def yaw_transform(theta):
     c, s = np.cos(theta), np.sin(theta)
     T = np.eye(4)
     T[:3, :3] = np.array(
@@ -288,7 +293,7 @@ def Tz(theta):
     return T
 
 
-def Tx(theta):
+def roll_transform(theta):
     c, s = np.cos(theta), np.sin(theta)
     T = np.eye(4)
     T[:3, :3] = np.array(
@@ -302,16 +307,16 @@ def Tx(theta):
     return T
 
 
-def make_Tew_yaw_variants(
+def make_tew_yaw_variants(
     Tew_base, angles=(0.0, np.pi / 2, np.pi, 3 * np.pi / 2)
 ):
-    return [Tz(th) @ Tew_base for th in angles]
+    return [yaw_transform(th) @ Tew_base for th in angles]
 
 
-def make_Tew_x_variants(
+def make_tew_x_variants(
     Tew_base, angles=(0.0, np.pi / 2, np.pi, 3 * np.pi / 2)
 ):
-    return [Tx(th) @ Tew_base for th in angles]
+    return [roll_transform(th) @ Tew_base for th in angles]
 
 
 def is_box_object(object_details):
@@ -424,7 +429,7 @@ def translational_half_extents(del_geom_x, del_geom_y):
 def get_del_geoms(clearance_size_x, clearance_size_y, gripper_width):
     pass
 
-def panda_TSR_parameters(object_details, yaw_buffer, alpha, grasp_strategy="top", min_contact_overlap=0.01):
+def panda_tsr_parameters(object_details, yaw_buffer, alpha, grasp_strategy="top", min_contact_overlap=0.01):
     object_position = object_details["position"]
     object_size = object_details["size"]
     object_dist = object_details["dist"]
@@ -449,7 +454,7 @@ def panda_TSR_parameters(object_details, yaw_buffer, alpha, grasp_strategy="top"
 
         #yaw_angles = yaw_angles_for_object_grasp(object_details, gripper_width=2 * s_f)
         yaw_angles, x_fits, y_fits = valid_grasp_yaw_offsets(object_details, 2 * s_f)
-        Tews = make_Tew_yaw_variants(Tew, yaw_angles)
+        Tews = make_tew_yaw_variants(Tew, yaw_angles)
 
         print(x_fits, y_fits)
         print(object_details)
@@ -544,9 +549,9 @@ def panda_TSR_parameters(object_details, yaw_buffer, alpha, grasp_strategy="top"
         ee_offset_eeframe = np.array([0.0, 0.0, -ee_offset])
         Tew[:3, 3] = R_new @ ee_offset_eeframe
 
-        #Tews = make_Tew_x_variants(Tew)
+        #Tews = make_tew_x_variants(Tew)
         yaw_angles = yaw_angles_for_object_grasp(object_details, gripper_width=2 * l_f)
-        Tews = make_Tew_yaw_variants(Tew, yaw_angles)
+        Tews = make_tew_yaw_variants(Tew, yaw_angles)
         #print(f"Tews length: {len(Tews)}")
 
         clearance_size_x, clearance_size_y = effective_xy_size_for_grasp_clearance(
@@ -594,7 +599,7 @@ def panda_TSR_parameters(object_details, yaw_buffer, alpha, grasp_strategy="top"
     return TSR_params
 
 
-def fetch_TSR_parameters(object_details, yaw_buffer, alpha):
+def fetch_tsr_parameters(object_details, yaw_buffer, alpha):
     object_position = object_details["position"]
     object_size = object_details["size"]
     object_dist = object_details["dist"]
@@ -613,7 +618,7 @@ def fetch_TSR_parameters(object_details, yaw_buffer, alpha):
     # Tew[2, 3] = ee_z_offset + object_size[2] / 4
 
     yaw_angles = yaw_angles_for_object_grasp(object_details, gripper_width=2 * s_f)
-    Tews = make_Tew_yaw_variants(Tew, yaw_angles)
+    Tews = make_tew_yaw_variants(Tew, yaw_angles)
 
     del_geom = s_f
     clearance_size_x, clearance_size_y = effective_xy_size_for_grasp_clearance(
@@ -688,9 +693,9 @@ def fetch_TSR_parameters(object_details, yaw_buffer, alpha):
     ee_offset_eeframe = np.array([0.0, 0.0, -ee_offset])
     Tew[:3, 3] = R_new @ ee_offset_eeframe
 
-    #Tews = make_Tew_x_variants(Tew)
+    #Tews = make_tew_x_variants(Tew)
     yaw_angles = yaw_angles_for_object_grasp(object_details, gripper_width=2 * l_f)
-    Tews = make_Tew_yaw_variants(Tew, yaw_angles)
+    Tews = make_tew_yaw_variants(Tew, yaw_angles)
     #print(f"Tews length: {len(Tews)}")
 
     clearance_size_x, clearance_size_y = effective_xy_size_for_grasp_clearance(
@@ -737,7 +742,7 @@ def fetch_TSR_parameters(object_details, yaw_buffer, alpha):
     return TSR_params
 
 
-def ur10_TSR_parameters(object_details, yaw_buffer, alpha):
+def ur10_tsr_parameters(object_details, yaw_buffer, alpha):
     # object_position = object_details["position"]
     object_size = object_details["size"]
     object_dist = object_details["dist"]
@@ -769,7 +774,7 @@ def ur10_TSR_parameters(object_details, yaw_buffer, alpha):
     # Tew[2, 3] = ee_z_offset + object_size[2] / 4
 
     yaw_angles = yaw_angles_for_object_grasp(object_details, gripper_width=2 * s_f)
-    Tews = make_Tew_yaw_variants(Tew, yaw_angles)
+    Tews = make_tew_yaw_variants(Tew, yaw_angles)
 
     Bw = np.array(
         [
@@ -836,9 +841,9 @@ def ur10_TSR_parameters(object_details, yaw_buffer, alpha):
     ee_offset_eeframe = np.array([0.0, 0.0, -ee_offset])
     Tew[:3, 3] = R_new @ ee_offset_eeframe
 
-    #Tews = make_Tew_x_variants(Tew)
+    #Tews = make_tew_x_variants(Tew)
     yaw_angles = yaw_angles_for_object_grasp(object_details, gripper_width=2 * l_f)
-    Tews = make_Tew_yaw_variants(Tew, yaw_angles)
+    Tews = make_tew_yaw_variants(Tew, yaw_angles)
 
     clearance_size_x, clearance_size_y = effective_xy_size_for_grasp_clearance(
         object_details, gripper_width=2 * l_f
@@ -1015,7 +1020,7 @@ def tile_center_inside_intervals(tile, intervals):
 
     return xmin <= cx <= xmax and ymin <= cy <= ymax
 
-def create_TCR_set(env, batch_idx=None):
+def create_tcr_set(env, batch_idx=None):
     env_details = env.env_details
     object_details = env.object_details
     grasp_details = env.grasp_details
@@ -1199,7 +1204,7 @@ def create_TCR_set(env, batch_idx=None):
 
     print(f"valid tiles: {len(valid_tiles)} / {n_tiles}")
 
-    TCR_set = tiles_to_iTSR_set(env, valid_tiles)
+    TCR_set = tiles_to_itsr_set(env, valid_tiles)
     return TCR_set
 
 def yaw_rot_2d(theta):
@@ -1316,7 +1321,7 @@ def tile_center_radius(tile, robot_pos):
 
     return np.sqrt(dx * dx + dy * dy), cx, cy
 
-def tiles_to_iTSR_set(env, valid_tiles):
+def tiles_to_itsr_set(env, valid_tiles):
     return {key: None for key in valid_tiles}
 
 def tile_1d(intervals, width, eps=1e-9):
@@ -1382,7 +1387,7 @@ def find_bins_per_dim(regions, bin_widths):
     
     return per_dim_bins, n_tiles
 
-def find_yaw_iTSR_set(object_details, problem_details, Tw2_w1):
+def find_yaw_itsr_set(object_details, problem_details, Tw2_w1):
 
     object_dist = object_details["dist"]
     object_position = object_details["position"]
@@ -1419,12 +1424,12 @@ def find_yaw_iTSR_set(object_details, problem_details, Tw2_w1):
                     np.arctan2(prev_Tw2_0[1, 0], prev_Tw2_0[0, 0]), 5
                 )
 
-            Tw1_0 = find_TSR_HMat(first_pos, yaw_1)
+            Tw1_0 = find_tsr_hmat(first_pos, yaw_1)
 
             tw2_0 = Tw1_0[:3, 3]  # Same position as Tw1
             yaw_2 = round(yaw_1 + Tw2_w1[3], 5)
 
-            Tw2_0 = find_TSR_HMat(first_pos, yaw_2)
+            Tw2_0 = find_tsr_hmat(first_pos, yaw_2)
 
             B12_yaw_intersect = np.array(
                 [
@@ -1436,7 +1441,7 @@ def find_yaw_iTSR_set(object_details, problem_details, Tw2_w1):
                     [yaw_2 - yaw_buffer, yaw_1 + yaw_buffer],
                 ]
             )
-            B12_yaw_intersect = find_TSR_Bounds(
+            B12_yaw_intersect = find_tsr_bounds(
                 Bw, Tw1_0, yaw_1, yaw_2, yaw_buffer, half_side, grasp=problem
             )
 
@@ -1460,7 +1465,7 @@ def find_yaw_iTSR_set(object_details, problem_details, Tw2_w1):
     return yaw_iTSR_set_all, yaw_to_cover_all
 
 
-def find_iTSR_set(
+def find_itsr_set(
     object_details,
     problem_details,
     yaw_tw2_w1_dict,
@@ -1543,7 +1548,7 @@ def find_iTSR_set(
                     Tw1_0[1, 3] = object_position[1] - object_dist[1]
                     Tw1_0[2, 3] = object_position[2] - object_dist[2]
 
-                    Tw1_0 = find_TSR_HMat(
+                    Tw1_0 = find_tsr_hmat(
                         [
                             object_position[0] - object_dist[0],
                             object_position[1] - object_dist[1],
@@ -1567,7 +1572,7 @@ def find_iTSR_set(
                 Tw2_0 = np.eye(4)
                 Tw2_0[:3, 3] = tw2_0
 
-                B1_0 = find_TSR_Bounds(
+                B1_0 = find_tsr_bounds(
                     Bw,
                     Tw1_0,
                     yaw_1,
@@ -1576,7 +1581,7 @@ def find_iTSR_set(
                     half_side,
                     grasp=grasp_strategy,
                 )
-                B2_0 = find_TSR_Bounds(
+                B2_0 = find_tsr_bounds(
                     Bw,
                     Tw2_0,
                     yaw_1,
@@ -1585,17 +1590,17 @@ def find_iTSR_set(
                     half_side,
                     grasp=grasp_strategy,
                 )
-                B12_intersect = find_B0_intersection(B1_0, B2_0)
+                B12_intersect = find_b0_intersection(B1_0, B2_0)
                 # print(f"B12 intersect: {B12_intersect}")
 
                 if dims[0] == 1 and dims[1] == 1:
                     tw3_0 = tw1_0 + yaw_tw2_w1_x  # x translation
                     tw4_0 = tw1_0 + yaw_tw2_w1_y  # y translation
 
-                    Tw3_0 = find_TSR_HMat(tw3_0, 0)
-                    Tw4_0 = find_TSR_HMat(tw4_0, 0)
+                    Tw3_0 = find_tsr_hmat(tw3_0, 0)
+                    Tw4_0 = find_tsr_hmat(tw4_0, 0)
 
-                    B3_0 = find_TSR_Bounds(
+                    B3_0 = find_tsr_bounds(
                         Bw,
                         Tw3_0,
                         yaw_1,
@@ -1604,7 +1609,7 @@ def find_iTSR_set(
                         half_side,
                         grasp=grasp_strategy,
                     )
-                    B4_0 = find_TSR_Bounds(
+                    B4_0 = find_tsr_bounds(
                         Bw,
                         Tw4_0,
                         yaw_1,
@@ -1614,8 +1619,8 @@ def find_iTSR_set(
                         grasp=grasp_strategy,
                     )
 
-                    B34_intersect = find_B0_intersection(B3_0, B4_0)
-                    B12_intersect = find_B0_intersection(
+                    B34_intersect = find_b0_intersection(B3_0, B4_0)
+                    B12_intersect = find_b0_intersection(
                         B34_intersect, B12_intersect
                     )
 
