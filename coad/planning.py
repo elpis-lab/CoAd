@@ -15,6 +15,23 @@ from scipy.spatial import cKDTree
 import vamp
 from scipy.spatial.transform import Rotation
 
+_OMPL_USES_NANOBIND = not hasattr(ob, "StateValidityCheckerFn")
+
+
+def _make_ompl_state(space):
+    """Allocate a mutable state with either OMPL Python binding API."""
+    if _OMPL_USES_NANOBIND:
+        return space.allocState()
+    return ob.State(space)
+
+
+def _state_pointer(state):
+    """Return the state representation expected by low-level OMPL methods."""
+    if _OMPL_USES_NANOBIND:
+        return state
+    return state()
+
+
 class VAMPPlanner:
     def __init__(
         self,
@@ -25,6 +42,10 @@ class VAMPPlanner:
         sampler_name="halton",
         log=False,
     ):
+        if vamp is None:
+            raise ImportError(
+                "VAMPPlanner requires the optional 'vamp' Python bindings."
+            )
         self.robot = robot
         self.model = robot.model
         self.data = data if data is not None else mujoco.MjData(self.model)
@@ -79,7 +100,7 @@ class VAMPPlanner:
             ],
             dtype=float,
         )
-        self.base_rot_world = Rotation.from_quat(quat_xyzw).as_matrix()        
+        self.base_rot_world = Rotation.from_quat(quat_xyzw).as_matrix()
 
         self.environment = self.build_environment(verbose=True)
         # raise NotImplementedError("VAMP not yet implemented.")
@@ -92,15 +113,12 @@ class VAMPPlanner:
         # Therefore, R_BW = R_WB.T.
         base_rot_inv = self.base_rot_world.T
 
-        base_pos = base_rot_inv @ (
-            world_pos - self.base_pos_world
-        )
+        base_pos = base_rot_inv @ (world_pos - self.base_pos_world)
 
         base_rot = base_rot_inv @ world_rot
 
         return base_pos, base_rot
 
-    
     def build_environment(self, verbose=False):
         vamp_env = vamp.Environment()
 
@@ -113,11 +131,7 @@ class VAMPPlanner:
             geom_type = self.model.geom_type[geom_id]
 
             world_pos = self.data.geom_xpos[geom_id].copy()
-            world_rot = (
-                self.data.geom_xmat[geom_id]
-                .reshape(3, 3)
-                .copy()
-            )
+            world_rot = self.data.geom_xmat[geom_id].reshape(3, 3).copy()
             size = self.model.geom_size[geom_id].copy()
 
             geom_name = mujoco.mj_id2name(
@@ -157,9 +171,7 @@ class VAMPPlanner:
                     world_rot,
                 )
 
-                base_euler = Rotation.from_matrix(
-                    base_rot
-                ).as_euler("xyz")
+                base_euler = Rotation.from_matrix(base_rot).as_euler("xyz")
 
                 vamp_env.add_cuboid(
                     vamp.Cuboid(
@@ -176,9 +188,7 @@ class VAMPPlanner:
                     world_rot,
                 )
 
-                base_euler = Rotation.from_matrix(
-                    base_rot
-                ).as_euler("xyz")
+                base_euler = Rotation.from_matrix(base_rot).as_euler("xyz")
 
                 vamp_env.add_cuboid(
                     vamp.Cuboid(
@@ -193,9 +203,7 @@ class VAMPPlanner:
                     world_rot,
                 )
 
-                base_euler = Rotation.from_matrix(
-                    base_rot
-                ).as_euler("xyz")
+                base_euler = Rotation.from_matrix(base_rot).as_euler("xyz")
 
                 radius = float(size[0])
                 length = 2.0 * float(size[1])
@@ -220,7 +228,9 @@ class VAMPPlanner:
                 if geom_name is None:
                     continue
 
-                primitive_list = self.env.swept_volume_primitives.get(geom_name)
+                primitive_list = self.env.swept_volume_primitives.get(
+                    geom_name
+                )
 
                 if primitive_list is None:
                     continue
@@ -229,15 +239,10 @@ class VAMPPlanner:
                     print(f"Adding mesh geom: {geom_name}")
                     print(f"Number of mesh primitives: {len(primitive_list)}")
 
-                geom_world_pos = (
-                    self.data.geom_xpos[geom_id]
-                    .copy()
-                )
+                geom_world_pos = self.data.geom_xpos[geom_id].copy()
 
                 geom_world_rot = (
-                    self.data.geom_xmat[geom_id]
-                    .reshape(3, 3)
-                    .copy()
+                    self.data.geom_xmat[geom_id].reshape(3, 3).copy()
                 )
 
                 for primitive in primitive_list:
@@ -277,8 +282,7 @@ class VAMPPlanner:
 
         if primitive_type not in {"cuboid", "cylinder"}:
             raise ValueError(
-                "Unsupported saved primitive type: "
-                f"{primitive_type}"
+                "Unsupported saved primitive type: " f"{primitive_type}"
             )
 
         primitive_local_pos = np.asarray(
@@ -293,14 +297,10 @@ class VAMPPlanner:
 
         # Geom-local primitive pose -> MuJoCo world pose.
         primitive_world_pos = (
-            geom_world_pos
-            + geom_world_rot @ primitive_local_pos
+            geom_world_pos + geom_world_rot @ primitive_local_pos
         )
 
-        primitive_world_rot = (
-            geom_world_rot
-            @ primitive_local_rot
-        )
+        primitive_world_rot = geom_world_rot @ primitive_local_rot
 
         # MuJoCo world pose -> robot-base/VAMP pose.
         base_pos, base_rot = self.world_pose_to_base(
@@ -308,9 +308,7 @@ class VAMPPlanner:
             primitive_world_rot,
         )
 
-        base_euler = Rotation.from_matrix(
-            base_rot
-        ).as_euler("xyz")
+        base_euler = Rotation.from_matrix(base_rot).as_euler("xyz")
 
         if primitive_type == "cuboid":
             half_extents = np.asarray(
@@ -350,7 +348,7 @@ class VAMPPlanner:
         benchmark=False,
         log=False,
     ):
-        
+
         # Setup environment for VAMP again (moved goal object)
         self.environment = self.build_environment()
 
@@ -375,8 +373,6 @@ class VAMPPlanner:
         #         self.vamp_robot.debug(goal, self.environment),
         #         flush=True,
         #     )
-
-
 
         # print(f"VAMP start valid: {start_valid}", flush=True)
         # print(f"VAMP goal valid: {goal_valid}", flush=True)
@@ -415,7 +411,7 @@ class VAMPPlanner:
 
         if result is None or result.path is None:
             return empty, planning_time, "no_solution"
-        
+
         path = result.path
 
         if smooth_path:
@@ -520,7 +516,7 @@ class VAMPPlanner:
     #             print("VAMP goal state is invalid.")
     #         # print("VAMP: Goal invalid")
     #         return empty, 0.0
-        
+
     #     # Start the timeout after environment construction and state validation.
     #     planning_start = time.perf_counter()
     #     deadline = planning_start + timeout
@@ -644,7 +640,6 @@ class OMPLPlanner:
 
         self.query_states = []
         self.goal_vertices = []
-        
 
     def set_up_ompl(self):
         """Setup OMPL planner"""
@@ -663,9 +658,10 @@ class OMPLPlanner:
         si.setStateValidityCheckingResolution(0.01)
 
         # State validity checker
-        ss.setStateValidityChecker(
-            ob.StateValidityCheckerFn(self.validity_checker)
-        )
+        validity_checker = self.validity_checker
+        if not _OMPL_USES_NANOBIND:
+            validity_checker = ob.StateValidityCheckerFn(validity_checker)
+        ss.setStateValidityChecker(validity_checker)
 
         # Optimization objective (default path length)
         ss.setOptimizationObjective(ob.PathLengthOptimizationObjective(si))
@@ -694,8 +690,8 @@ class OMPLPlanner:
     ):
 
         # Set up start and goal states
-        start_state = ob.State(self.si.getStateSpace())
-        goal_state = ob.State(self.si.getStateSpace())
+        start_state = _make_ompl_state(self.si.getStateSpace())
+        goal_state = _make_ompl_state(self.si.getStateSpace())
         for i_q in range(self.n_dof):
             start_state[i_q] = float(start[i_q])
             goal_state[i_q] = float(goal[i_q])
@@ -741,13 +737,8 @@ class OMPLPlanner:
             planning_time = self.ss.getLastPlanComputationTime()
             return waypoints, total_time, planning_time
         return waypoints
-    
 
-    def construct_roadmap(
-        self,
-        start,
-        timeout=30.0
-    ):
+    def construct_roadmap(self, start, timeout=30.0):
         """
         Sample uniformly in the state space and build a roadmap.
         The roadmap is kept for subsequent planning calls.
@@ -757,34 +748,39 @@ class OMPLPlanner:
         ), f"Planner {self.planner_name} is not supported."
 
         self.start_np = np.asarray(start, dtype=float).copy()
-        
-        self.start_state = ob.State(self.si.getStateSpace())
+
+        self.start_state = _make_ompl_state(self.si.getStateSpace())
         for i in range(self.n_dof):
             self.start_state[i] = float(start[i])
-        
+
         # Start growing the roadmap
         self.ss.setStartAndGoalStates(self.start_state, self.start_state)
         self.ss.setup()
         ter = ob.timedPlannerTerminationCondition(float(timeout))
         self.planner.constructRoadmap(ter)
 
-        # Add persistent start milestone AFTER roadmap construction.
-        n0 = self.planner.milestoneCount()
-        e0 = self.planner.edgeCount()
-
-        self.v_start = self.planner.addMilestone(self.start_state())
+        # Boost.Python exposed PRM::addMilestone; OMPL 2's nanobind API does
+        # not. Query states are connected to the extracted graph below, so a
+        # persistent start milestone is optional.
+        if hasattr(self.planner, "addMilestone"):
+            self.v_start = self.planner.addMilestone(
+                _state_pointer(self.start_state)
+            )
+        else:
+            self.v_start = None
 
         # print("start milestone added")
         # print("milestones:", n0, "->", self.planner.milestoneCount())
         # print("edges:", e0, "->", self.planner.edgeCount())
-        print(f"Roadmap edge count after construction: {self.planner.edgeCount()}")
+        print(
+            f"Roadmap edge count after construction: {self.planner.edgeCount()}"
+        )
 
         # print("Building python graph...")
 
         self.build_graph_from_planner_data()
 
         # print("Done building Python graph.")
-
 
     def validate_path(self, path):
         states = path.getStates()
@@ -824,11 +820,12 @@ class OMPLPlanner:
             vertices[i] = [s[j] for j in range(self.n_dof)]
 
         # Extract edges
-        import ompl.util as ou
-
         for i in range(n):
-            edge_list = ou.vectorUint()
-            pd.getEdges(i, edge_list)
+            if _OMPL_USES_NANOBIND:
+                edge_list = pd.getEdges(i)
+            else:
+                edge_list = ou.vectorUint()
+                pd.getEdges(i, edge_list)
 
             for j in edge_list:
                 j = int(j)
@@ -864,11 +861,14 @@ class OMPLPlanner:
             j = int(j)
             qj_state = self.numpy_to_state(self.graph_vertices[j])
 
-            if self.si.checkMotion(q_state(), qj_state()):
+            if self.si.checkMotion(
+                _state_pointer(q_state),
+                _state_pointer(qj_state),
+            ):
                 edges.append((j, float(dist)))
 
         return edges
-    
+
     def make_query_graph(self, start_q, goal_q, k=30):
         vertices = self.graph_vertices
         base_adj = self.graph_adj
@@ -901,7 +901,7 @@ class OMPLPlanner:
         max_attempts=5,
         k=30,
         smooth_path=True,
-        num_waypoints=200
+        num_waypoints=200,
     ):
         query_adj, s_idx, g_idx = self.make_query_graph(start, goal, k=k)
         blocked_edges = set()
@@ -923,7 +923,7 @@ class OMPLPlanner:
                 np.asarray(start, dtype=float),
                 np.asarray(goal, dtype=float),
                 blocked_edges=blocked_edges,
-                blocked_vertices=blocked_vertices
+                blocked_vertices=blocked_vertices,
             )
             if idx_path is None:
                 return None
@@ -956,10 +956,13 @@ class OMPLPlanner:
                 if not valid:
                     return None
 
-                return np.array([
-                    [s[i] for i in range(self.n_dof)]
-                    for s in path.getStates()
-                ], dtype=float)
+                return np.array(
+                    [
+                        [s[i] for i in range(self.n_dof)]
+                        for s in path.getStates()
+                    ],
+                    dtype=float,
+                )
 
             if failure is None:
                 return None
@@ -983,11 +986,11 @@ class OMPLPlanner:
         return None
 
     def numpy_to_state(self, q):
-        s = ob.State(self.si.getStateSpace())
+        s = _make_ompl_state(self.si.getStateSpace())
         for i in range(self.n_dof):
             s[i] = float(q[i])
         return s
-    
+
     def idx_path_to_waypoints(self, idx_path, start_q, goal_q):
         n = len(self.graph_vertices)
         out = []
@@ -1001,13 +1004,13 @@ class OMPLPlanner:
                 out.append(np.asarray(goal_q, dtype=float))
 
         return np.asarray(out)
-    
+
     def np_path_to_path_geometric(self, q_path):
         path = og.PathGeometric(self.si)
 
         for q in q_path:
             s = self.numpy_to_state(q)
-            path.append(s())
+            path.append(_state_pointer(s))
 
         return path
 
@@ -1018,19 +1021,84 @@ class OMPLPlanner:
         states = [self.numpy_to_state(q) for q in q_path]
 
         for i, s in enumerate(states):
-            if not self.validity_checker(s()):
+            if not self.validity_checker(_state_pointer(s)):
                 return False, ("state", i)
 
         for i in range(len(states) - 1):
-            if not self.si.checkMotion(states[i](), states[i + 1]()):
+            if not self.si.checkMotion(
+                _state_pointer(states[i]),
+                _state_pointer(states[i + 1]),
+            ):
                 return False, ("edge", i, i + 1)
 
         return True, None
 
+
+class ERTConnectPlanner(OMPLPlanner):
+    def __init__(self, robot, data=None):
+        if not hasattr(og, "ERTConnect"):
+            raise ImportError(
+                "Rebuild and pip install ~/Github/ompl/py-bindings with ERTConnect enabled"
+            )
+        super().__init__(robot, data, planner="ERTConnect")
+
+    def prepare_experience(self, waypoints):
+        points = np.asarray(waypoints, dtype=float)
+        if (
+            points.ndim != 2
+            or points.shape[1] != self.n_dof
+            or len(points) < 2
+        ):
+            raise ValueError(
+                "Experience must contain at least two joint configurations"
+            )
+        if not np.isfinite(points).all():
+            raise ValueError("Experience contains nonfinite values")
+        path = self.np_path_to_path_geometric(points)
+        # A short root + goal path needs sufficient phase resolution for ERT.
+        path.interpolate(max(200, path.getStateCount()))
+        return path
+
+    def solve_experience(self, start, goal, experience, timeout=3.0):
+        """Return path, solve seconds, online seconds, and independently checked success.
+
+        Online time includes copying the prior, query setup and solution extraction.
+        Independent collision/endpoint verification is outside the planning timer.
+        No smoothing is applied, matching the unsmoothed planning-time baseline.
+        """
+        begin = time.perf_counter()
+        self.ss.clear()
+        self.planner.setExperience(experience)
+        self.ss.setStartAndGoalStates(
+            self.numpy_to_state(start), self.numpy_to_state(goal)
+        )
+        status = self.ss.solve(float(timeout))
+        solve_seconds = self.ss.getLastPlanComputationTime()
+        path = None
+        points = np.empty((0, self.n_dof))
+        if status == ob.PlannerStatus.EXACT_SOLUTION:
+            path = self.ss.getSolutionPath()
+            points = np.array(
+                [[s[j] for j in range(self.n_dof)] for s in path.getStates()]
+            )
+        online_seconds = time.perf_counter() - begin
+        valid = bool(
+            len(points)
+            and np.allclose(points[0], start, atol=1e-6)
+            and np.allclose(points[-1], goal, atol=1e-6)
+            and self.validate_path(path)
+        )
+        self.ss.clear()
+        return points, solve_seconds, online_seconds, valid
+
+
 import heapq
 import math
 
-def dijkstra(adj, start_idx, goal_idx, blocked_edges=None, blocked_vertices=None):
+
+def dijkstra(
+    adj, start_idx, goal_idx, blocked_edges=None, blocked_vertices=None
+):
     if blocked_edges is None:
         blocked_edges = set()
     if blocked_vertices is None:
@@ -1077,12 +1145,22 @@ def dijkstra(adj, start_idx, goal_idx, blocked_edges=None, blocked_vertices=None
 
     return path[::-1]
 
-def astar(adj, start_idx, goal_idx, vertices, start_q, goal_q, blocked_edges=None, blocked_vertices=None):
+
+def astar(
+    adj,
+    start_idx,
+    goal_idx,
+    vertices,
+    start_q,
+    goal_q,
+    blocked_edges=None,
+    blocked_vertices=None,
+):
     if blocked_edges is None:
         blocked_edges = set()
     if blocked_vertices is None:
         blocked_vertices = set()
-    
+
     n_graph = len(vertices)
     n_total = len(adj)
 
@@ -1097,7 +1175,7 @@ def astar(adj, start_idx, goal_idx, vertices, start_q, goal_q, blocked_edges=Non
 
     def heuristic(idx):
         return np.linalg.norm(q_of(idx) - goal_q)
-    
+
     g_score = np.full(n_total, np.inf)
     parent = np.full(n_total, -1, dtype=np.int64)
 
@@ -1126,10 +1204,10 @@ def astar(adj, start_idx, goal_idx, vertices, start_q, goal_q, blocked_edges=Non
                 g_score[v] = new_g
                 parent[v] = u
                 heapq.heappush(pq, (new_g + heuristic(v), new_g, v))
-    
+
     if not np.isfinite(g_score[goal_idx]):
         return None
-    
+
     path = []
     cur = goal_idx
     while cur != -1:
@@ -1137,6 +1215,7 @@ def astar(adj, start_idx, goal_idx, vertices, start_q, goal_q, blocked_edges=Non
         cur = parent[cur]
 
     return path[::-1]
+
 
 def euclidean_path_length(traj):
     """Compute the length of a trajectory."""

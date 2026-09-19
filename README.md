@@ -25,7 +25,7 @@ pip install -r requirements.txt
 ```
 
 #### OMPL
-Install OMPL python bindings with provided pre-built wheels in [OMPL Github Releases](https://github.com/ompl/ompl/releases). This project uses OMPL 1.7.0.
+Install OMPL python bindings with provided pre-built wheels in [OMPL Github Releases](https://github.com/ompl/ompl/releases). This project uses OMPL 2.0.0.
 
 #### Real-robot Deployment
 If you want to run this with a real UR robot
