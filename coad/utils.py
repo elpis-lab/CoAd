@@ -56,34 +56,21 @@ def load_env_and_robot(
     env_name: str,
     robot_name: str,
     visualize: bool = True,
-    swept_vlume: bool = True,
+    using_swept_volume: bool = True,
     compute_tcr: bool = True,
 ) -> tuple[MujocoEnv, MujocoRobot]:
-    # Build scene for given environment
-    if env_name == "table":
-        env = TableEnv(robot_name, swept_vlume=swept_vlume)
-    elif env_name == "box":
-        env = BoxEnv(robot_name, swept_vlume=swept_vlume)
-    elif env_name == "cage":
-        env = CageEnv(robot_name, swept_vlume=swept_vlume)
-    elif env_name == "shelf":
-        env = ShelfEnv(robot_name, swept_vlume=swept_vlume)
-    elif env_name == "free":
-        env = FreeEnv(robot_name, swept_vlume=swept_vlume)
-    elif env_name == "real":
-        env = RealEnv(robot_name, swept_vlume=swept_vlume)
-    elif env_name == "largeobj":
-        env = LargeObjectEnv(robot_name, swept_vlume=swept_vlume)
-    elif env_name == "microwave":
-        env = MicrowaveEnv(
-            robot_name, swept_vlume=swept_vlume, compute_tcr=compute_tcr
-        )
-    elif env_name == "allstable":
-        env = AllStableEnv(robot_name, swept_vlume=swept_vlume)
-    elif env_name == "conveyor":
-        env = ConveyorEnv(robot_name, swept_vlume=swept_vlume)
-    else:
+    # Keep one constructor path so optional flags reach every environment.
+    environments = {
+        "table": TableEnv, "box": BoxEnv, "cage": CageEnv,
+        "shelf": ShelfEnv, "free": FreeEnv, "real": RealEnv,
+        "largeobj": LargeObjectEnv, "microwave": MicrowaveEnv,
+        "allstable": AllStableEnv, "conveyor": ConveyorEnv,
+    }
+    if env_name not in environments:
         raise ValueError(f"Invalid environment: {env_name}")
+    env = environments[env_name](
+        robot_name, using_swept_volume=using_swept_volume, compute_tcr=compute_tcr
+    )
 
     # Configure problem home pose
     NEW_ENVS = [LargeObjectEnv, AllStableEnv, MicrowaveEnv]

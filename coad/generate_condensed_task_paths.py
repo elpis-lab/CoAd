@@ -541,7 +541,8 @@ def parse_arguments():
         "real",
         "largeobj",
         "microwave",
-        "allstable"
+        "allstable",
+        "conveyor"
         ], default="table",
     )
     parser.add_argument(

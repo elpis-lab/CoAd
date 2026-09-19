@@ -33,7 +33,7 @@ def build_library(
     model, data = robot.model, robot.data
     start = robot.get_joint_qpos()
     ompl_planner = OMPLPlanner(robot, data, planner=planner)
-    ik_solver = get_ik_solver(robot, env_collision_geoms=env.collision_geoms)
+    ik_solver = get_ik_solver(robot, env_collision_geoms=env.env_details["collision_geoms"])
     if adaptation == "linear":
         adapter = LinearAdapter(robot, ik_solver)
     elif adaptation == "grr":

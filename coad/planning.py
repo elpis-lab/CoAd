@@ -38,7 +38,7 @@ class VAMPPlanner:
         robot: MujocoRobot,
         env,
         data=None,
-        robot_name="panda",
+        robot_name=None,
         sampler_name="halton",
         log=False,
     ):
@@ -54,6 +54,7 @@ class VAMPPlanner:
             self.data.qpos[:] = robot.data.qpos[:]
 
         self.n_dof = robot.n_joints
+        robot_name = robot_name or env.env_details["robot"]
         self.robot_name = robot_name
         self.vamp_robot_name = (
             "panda_corrected" if robot_name == "panda" else robot_name
@@ -728,13 +729,13 @@ class OMPLPlanner:
             if log:
                 print("Path planning failed.")
 
+        planning_time = self.ss.getLastPlanComputationTime()
         self.ss.clear()
         if benchmark:
             t1 = time.perf_counter()
             # total time: plan + simplify + interpolation
-            total_time = round(t1 - t0, 5)
+            total_time = t1 - t0
             # planning time: time spent in planning
-            planning_time = self.ss.getLastPlanComputationTime()
             return waypoints, total_time, planning_time
         return waypoints
 
@@ -786,7 +787,7 @@ class OMPLPlanner:
         states = path.getStates()
 
         for s in states:
-            if not self.validity_checker(s):
+            if not self.si.satisfiesBounds(s) or not self.validity_checker(s):
                 return False
 
         for s1, s2 in zip(states[:-1], states[1:]):
