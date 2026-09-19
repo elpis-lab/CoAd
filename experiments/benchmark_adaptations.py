@@ -20,14 +20,22 @@ from coad.adaptation import DMPAdapter, TrajOptAdapter
 from experiments.visualize_paths import traj_len
 from coad.utils import set_seed, load_env_and_robot, get_data_folder
 
-from coad.env import FreeEnv, CageEnv, BoxEnv, TableEnv, ShelfEnv, LargeObjectEnv, MicrowaveEnv, AllStableEnv
+from coad.env import (
+    FreeEnv,
+    CageEnv,
+    BoxEnv,
+    TableEnv,
+    ShelfEnv,
+    LargeObjectEnv,
+    MicrowaveEnv,
+    AllStableEnv,
+)
 from coad.robot import Panda, UR10, FetchArm
 
 from experiments.evaluate_baselines import BoxGrid, sample_from_key
 
 folder1 = "dataset/top_naive"
 folder2 = "dataset/top"
-
 
 
 def deep_tuple(x):
@@ -57,6 +65,7 @@ def get_avg_path_length(root_path, key_map):
 def wrap_pi(self, a):
     return (a + np.pi) % (2 * np.pi) - np.pi
 
+
 from collections import defaultdict
 import numpy as np
 
@@ -64,10 +73,7 @@ import numpy as np
 def inspect_grid(task_set):
     keys = list(task_set.keys())
 
-    has_face = (
-        len(keys[0]) == 5
-        and isinstance(keys[0][0], str)
-    )
+    has_face = len(keys[0]) == 5 and isinstance(keys[0][0], str)
 
     groups = defaultdict(list)
 
@@ -81,16 +87,20 @@ def inspect_grid(task_set):
         print(f"Number of keys: {len(face_keys)}")
 
         for dim, name in enumerate(["x", "y", "z", "yaw"]):
-            intervals = sorted({
-                (
-                    round(float(key[dim][0]), 10),
-                    round(float(key[dim][1]), 10),
-                )
-                for key in face_keys
-            })
+            intervals = sorted(
+                {
+                    (
+                        round(float(key[dim][0]), 10),
+                        round(float(key[dim][1]), 10),
+                    )
+                    for key in face_keys
+                }
+            )
 
             starts = np.array(sorted({lo for lo, _ in intervals}))
-            widths = np.array(sorted({round(hi - lo, 10) for lo, hi in intervals}))
+            widths = np.array(
+                sorted({round(hi - lo, 10) for lo, hi in intervals})
+            )
 
             print(f"\n{name}:")
             print(f"  unique intervals: {len(intervals)}")
@@ -140,8 +150,6 @@ def inspect_grid(task_set):
         )
 
 
-
-
 def evaluate_adaptations(
     args,
     env: MujocoEnv,
@@ -155,7 +163,9 @@ def evaluate_adaptations(
     home_qpos = robot.get_joint_qpos()
 
     # ik_solver = get_ik_solver(robot, env_collision_geoms=env.collision_geoms)
-    ik_solver = get_ik_solver(robot, env_collision_geoms=env.env_details['collision_geoms'])
+    ik_solver = get_ik_solver(
+        robot, env_collision_geoms=env.env_details["collision_geoms"]
+    )
     solved_task_paths_keys = [
         k
         for k, path in task_paths.items()
@@ -254,9 +264,11 @@ def evaluate_adaptations(
             )
             print(
                 "Sample index exists:",
-                sampled_indices in indexer.index
-                if sampled_indices is not None
-                else False,
+                (
+                    sampled_indices in indexer.index
+                    if sampled_indices is not None
+                    else False
+                ),
             )
 
             if sampled_indices in indexer.index:
@@ -413,40 +425,12 @@ def main(args):
         )
     print(f"Adaptations found: {adaptations_found}")
 
-    env_name = args.env
-    robot_name = args.robot
-    visualize = False
-
-    if env_name == "table":
-        env = TableEnv(robot_name, using_swept_volume=False)
-    elif env_name == "box":
-        env = BoxEnv(robot_name, using_swept_volume=False)
-    elif env_name == "cage":
-        env = CageEnv(robot_name, using_swept_volume=False)
-    elif env_name == "shelf":
-        env = ShelfEnv(robot_name, using_swept_volume=False)
-    elif env_name == "free":
-        env = FreeEnv(robot_name, using_swept_volume=False)
-    elif env_name == "largeobj":
-        env = LargeObjectEnv(robot_name, using_swept_volume=False)
-    elif env_name == "allstable":
-        env = AllStableEnv(robot_name, using_swept_volume=False)
-    else:
-        raise ValueError(f"Invalid environment: {env_name}")
-
-    model, data = env.model, env.data
-    if robot_name == "panda":
-        robot = Panda(model, data, visualize)
-    elif robot_name == "ur10":
-        robot = UR10(model, data, visualize)
-    elif robot_name == "fetch":
-        robot = FetchArm(model, data, visualize)
-    else:
-        raise ValueError(f"Invalid robot: {robot_name}")
-
-    robot_pos = env.env_details['robot_pos']
-    robot_quat = env.env_details['robot_quat']
-    robot.teleport_base(pos=robot_pos, quat=robot_quat)
+    env, robot = load_env_and_robot(
+        args.env,
+        args.robot,
+        visualize=False,
+        swept_vlume=False,
+    )
 
     # root_data = pickle.load(open(root_path, "rb"))
     # map_data = pickle.load(open(map_path, "rb"))
@@ -457,6 +441,7 @@ def main(args):
     evaluate_adaptations(
         args, env, robot, folder, task_set, task_paths, adaptations_found
     )
+    robot.close()
 
 
 def parse_arguments():
@@ -464,7 +449,8 @@ def parse_arguments():
     # envs
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument(
-        "--env", choices=[
+        "--env",
+        choices=[
             "table",
             "box",
             "cage",
@@ -472,8 +458,10 @@ def parse_arguments():
             "free",
             "largeobj",
             "microwave",
-            "allstable"
-            ], default="table",
+            "allstable",
+            "conveyor",
+        ],
+        default="table",
     )
     parser.add_argument(
         "--robot", choices=["panda", "ur10", "fetch"], default="panda"
@@ -482,12 +470,14 @@ def parse_arguments():
         "--ik", choices=["random", "neighbor", "grr"], default="neighbor"
     )
     parser.add_argument(
-        "--planner", choices=["RRTConnect", "PRMstar", "VAMP"], default="RRTConnect"
+        "--planner",
+        choices=["RRTConnect", "PRMstar", "VAMP"],
+        default="RRTConnect",
     )
     # parser.add_argument(
     #     "--adaptation", choices=["linear", "grr", "dmp", "opt"], default="grr"
     # )
-    parser.add_argument("--n_neighbors", type=int, default=100)
+    parser.add_argument("--n_neighbors", type=int, default=1000)
 
     args = parser.parse_args()
     return args

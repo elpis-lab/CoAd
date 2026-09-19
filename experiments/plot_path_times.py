@@ -4,9 +4,11 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
+from matplotlib import font_manager
+from matplotlib.ticker import LogFormatterMathtext
 import matplotlib as mpl
 
-mpl.rcParams["text.usetex"] = True
+mpl.rcParams["text.usetex"] = False
 mpl.rcParams["font.family"] = "serif"
 mpl.rcParams["font.serif"] = ["Times New Roman"]
 mpl.rcParams["mathtext.fontset"] = "stix"  # makes math look like Times
@@ -26,10 +28,26 @@ ENV_NAME_MAP = {
     "shelf": "Shelf",
     "box": "Box",
     "allstable": "All Stable",
+    "conveyor": "Conveyor",
     "largeobj": "Large Object",
     "microwave": "Microwave",
     "real": "Real",
 }
+
+
+def require_times_new_roman():
+    """Fail instead of silently substituting a different paper font."""
+    try:
+        return font_manager.findfont(
+            "Times New Roman",
+            fallback_to_default=False,
+        )
+    except ValueError as error:
+        raise RuntimeError(
+            "Times New Roman is required to render this paper figure. "
+            "Install the Microsoft core fonts before running this script."
+        ) from error
+
 
 def prepare_data(
     experiments,
@@ -53,11 +71,12 @@ def prepare_data(
     """
     default_method_name_map = {
         "RRT-Connect": ("rrtc", None),
-        "VAMP-RRTConnect": ("vamp", None),
-        "Library Baseline": ("library", None),
-        "LOAD-LI": ("adaptations", "grr"),
-        "LOAD-STO": ("adaptations", "opt"),
-        "LOAD-DMP": ("adaptations", "dmp"),
+        "RRT-Connect-VAMP": ("vamp", None),
+        "Lightning": ("library", None),
+        "ERT-Connect": ("ertconnect", None),
+        "COAD-LI": ("adaptations", "grr"),
+        "COAD-STO": ("adaptations", "opt"),
+        "COAD-DMP": ("adaptations", "dmp"),
     }
     if method_name_map is None:
         method_name_map = default_method_name_map
@@ -74,9 +93,7 @@ def prepare_data(
             print(f"[Warn] Missing: {data_path}")
             if fill_missing_with_nan:
                 for m in methods:
-                    data_out[(robot, env, m)] = np.array(
-                        [np.nan], dtype=float
-                    )
+                    data_out[(robot, env, m)] = np.array([np.nan], dtype=float)
             continue
 
         npz = np.load(data_path, allow_pickle=True)
@@ -84,18 +101,18 @@ def prepare_data(
 
         for m in methods:
             if m not in method_name_map:
-                raise KeyError(
-                    f"Method '{m}' missing from method_name_map"
-                )
+                raise KeyError(f"Method '{m}' missing from method_name_map")
 
             top_key, adapt_key = method_name_map[m]
 
             # -------- Extract raw arrays + success mask --------
             # if top_key in ("rrtc", "library"):
-            if top_key in ("rrtc", "vamp", "library"):
-                values_raw = np.asarray(
-                    results[top_key][metric], dtype=float
-                )
+            if top_key in ("rrtc", "vamp", "library", "ertconnect"):
+                if top_key not in results:
+                    print(f"[Warn] Missing {m} for {robot}-{env}")
+                    data_out[(robot, env, m)] = np.array([np.nan])
+                    continue
+                values_raw = np.asarray(results[top_key][metric], dtype=float)
                 success_raw = np.asarray(
                     results[top_key]["success"], dtype=bool
                 )
@@ -118,9 +135,7 @@ def prepare_data(
                         f"[Warn] Missing {m} data for "
                         f"{robot}-{env}; using NaN"
                     )
-                    data_out[(robot, env, m)] = np.array(
-                        [np.nan], dtype=float
-                    )
+                    data_out[(robot, env, m)] = np.array([np.nan], dtype=float)
                     continue
 
                 values_raw = np.asarray(
@@ -182,7 +197,7 @@ def plot_path_quality_boxplot(
     #     (r, e) for r in ["panda", "fetch"] for e in ["table", "cage", "shelf"]
     # ]
     # sections.append(("ur10", "real"))
-    
+
     # sections = [
     #     (robot, env)
     #     for robot in robots
@@ -217,8 +232,7 @@ def plot_path_quality_boxplot(
         #     f"{ROBOT_NAME_MAP.get(r, r)} - {ENV_NAME_MAP.get(e, e)}"
         # )
         section_labels.append(
-            f"{ROBOT_NAME_MAP.get(r, r)}\n"
-            f"{ENV_NAME_MAP.get(e, e)}"
+            f"{ROBOT_NAME_MAP.get(r, r)}\n" f"{ENV_NAME_MAP.get(e, e)}"
         )
         pos += gap
 
@@ -242,18 +256,26 @@ def plot_path_quality_boxplot(
         zorder=3,
     )
 
-    # Consistent method colors
-    colors = (
-        plt.rcParams["axes.prop_cycle"]
-        .by_key()
-        .get("color", ["C0", "C1", "C2", "C3", "C4", "C5"])
-    )
-    method_colors = [colors[i % len(colors)] for i in range(n_methods)]
+    color_map = {
+        "RRT-Connect": "tab:purple",
+        "RRT-Connect-VAMP": "tab:pink",
+        "Lightning": "tab:pink",
+        "ERT-Connect": "tab:orange",
+        "COAD-LI": "tab:red",
+        "COAD-DMP": "tab:green",
+        "COAD-STO": "tab:blue",
+    }
+    method_colors = [color_map[method] for method in methods]
 
     for i, box in enumerate(bp["boxes"]):
         box.set_facecolor(method_colors[method_ids[i]])
-        box.set_alpha(0.85)
-        box.set_edgecolor("black")
+        box.set_alpha(1.0)
+        box.set_edgecolor("none")
+
+    for i, whisker in enumerate(bp["whiskers"]):
+        whisker.set_color(method_colors[method_ids[i // 2]])
+    for i, cap in enumerate(bp["caps"]):
+        cap.set_color(method_colors[method_ids[i // 2]])
 
     for med in bp["medians"]:
         med.set_linewidth(1.5)
@@ -269,6 +291,9 @@ def plot_path_quality_boxplot(
     if metric == "times":
         ax.set_ylabel("Time (ms)", fontsize=xlabel_ylabel_size)
         ax.set_yscale("log")
+        ax.set_ylim(5e-3, 5e3)
+        ax.set_yticks([1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3])
+        ax.yaxis.set_major_formatter(LogFormatterMathtext(base=10))
     elif metric == "lengths":
         ax.set_ylabel("Path Length (radians)", fontsize=xlabel_ylabel_size)
     else:
@@ -296,7 +321,7 @@ def plot_path_quality_boxplot(
         ha="center",
     )
     ax.tick_params(axis="y", labelsize=22)
-    
+
     ax.set_xlim(min(positions) - 1.0, max(positions) + 1.0)
     # ax.set_xlim(min(positions) - 0.5, max(positions) + 0.5)
 
@@ -305,19 +330,15 @@ def plot_path_quality_boxplot(
         sep_x = (positions[i * n_methods - 1] + positions[i * n_methods]) / 2.0
         ax.axvline(sep_x, linewidth=1.0, color="0.85", zorder=1)
 
-    # Right-side legend
     def format_method_label(m):
-        if m.startswith("LOAD-"):
-            suffix = m.split("LOAD-")[1]
-            return rf"\textsc{{CoAd}}-{suffix}"
         return m
 
     handles = [
         Patch(
             facecolor=method_colors[i],
-            edgecolor="black",
+            edgecolor="none",
             label=format_method_label(methods[i]),
-            alpha=0.85,
+            alpha=1.0,
         )
         for i in range(n_methods)
     ]
@@ -344,15 +365,16 @@ def plot_path_quality_boxplot(
 
     legend = ax.legend(
         handles=handles,
-        loc="center left",
-        bbox_to_anchor=(1.005, 0.5),
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.95),
+        ncol=len(methods),
         frameon=False,
-        fontsize=24,
-        title="Methods",
-        title_fontsize=24,
+        fontsize=21,
+        columnspacing=1.0,
+        handletextpad=0.5,
     )
 
-    fig.subplots_adjust(left=0.065, right=0.81)
+    fig.subplots_adjust(left=0.065, right=0.995, bottom=0.22, top=0.84)
 
     for text in legend.get_texts():
         if text.get_text().startswith("CoAd"):
@@ -401,11 +423,12 @@ def print_experiment_stats(
 
     default_method_name_map = {
         "RRT-Connect": ("rrtc", None),
-        "VAMP-RRTConnect": ("vamp", None),
-        "Library Baseline": ("library", None),
-        "LOAD-LI": ("adaptations", "grr"),
-        "LOAD-STO": ("adaptations", "opt"),
-        "LOAD-DMP": ("adaptations", "dmp"),
+        "RRT-Connect-VAMP": ("vamp", None),
+        "Lightning": ("library", None),
+        "ERT-Connect": ("ertconnect", None),
+        "COAD-LI": ("adaptations", "grr"),
+        "COAD-STO": ("adaptations", "opt"),
+        "COAD-DMP": ("adaptations", "dmp"),
     }
 
     if method_name_map is None:
@@ -475,23 +498,19 @@ def print_experiment_stats(
             # SUCCESS RATE
             # ------------------------
             # if top_key in ("rrtc", "library"):
-            if top_key in ("rrtc", "vamp", "library"):
-                success = np.asarray(
-                    results[top_key]["success"], dtype=bool
-                )
+            if top_key in ("rrtc", "vamp", "library", "ertconnect"):
+                if top_key not in results:
+                    print(f"{m:<20} | not available for {robot}-{env}")
+                    continue
+                success = np.asarray(results[top_key]["success"], dtype=bool)
 
             elif top_key == "adaptations":
-                adaptation_success = (
-                    results
-                    .get("adaptations", {})
-                    .get("success", {})
+                adaptation_success = results.get("adaptations", {}).get(
+                    "success", {}
                 )
 
                 if adapt_key not in adaptation_success:
-                    print(
-                        f"{m:<20} | "
-                        f"not available for {robot}-{env}"
-                    )
+                    print(f"{m:<20} | " f"not available for {robot}-{env}")
                     continue
 
                 success = np.asarray(
@@ -524,20 +543,21 @@ def print_experiment_stats(
 
 
 if __name__ == "__main__":
+    print(f"Using font: {require_times_new_roman()}")
     # methods = [
     #     "RRT-Connect",
-    #     "Library Baseline",
+    #     "Lightning",
     #     "LOAD-LI",
     #     "LOAD-DMP",
     #     "LOAD-STO",
     # ]
     methods = [
         "RRT-Connect",
-        "VAMP-RRTConnect",
-        "Library Baseline",
-        "LOAD-LI",
-        "LOAD-DMP",
-        "LOAD-STO",
+        "RRT-Connect-VAMP",
+        "ERT-Connect",
+        "COAD-LI",
+        "COAD-DMP",
+        "COAD-STO",
     ]
 
     robots = ["panda", "fetch", "ur10"]
@@ -547,17 +567,16 @@ if __name__ == "__main__":
     robots = ["panda", "fetch"]
     envs = ["table", "cage", "allstable", "largeobj"]
 
-
     experiments = [
-        ("panda", "table"),
+        ("panda", "conveyor"),
         ("panda", "allstable"),
         ("panda", "cage"),
-        ("panda", "largeobj"),
+        ("panda", "shelf"),
         ("panda", "microwave"),
-        ("fetch", "table"),
+        ("fetch", "conveyor"),
         ("fetch", "allstable"),
         ("fetch", "cage"),
-        ("fetch", "largeobj"),
+        ("fetch", "shelf"),
         ("fetch", "microwave"),
         ("ur10", "real"),
     ]
@@ -596,7 +615,7 @@ if __name__ == "__main__":
         experiments,
         methods,
         metric=metric,
-        save_name="times_vamp",
+        save_name="planning_times",
         # fig_size=(28, 5),
-        fig_size=(24, 5),
+        fig_size=(24, 6),
     )

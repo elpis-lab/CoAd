@@ -651,6 +651,7 @@ def parse_arguments():
     )
     parser.add_argument(
         "--num_workers",
+        dest="num_workers",
         type=int,
         default=2,
         help="Number of parallel condensation worker processes.",

@@ -648,7 +648,6 @@ def parse_arguments():
         default=1000,
     )
     parser.add_argument(
-        "--num-workers",
         "--num_workers",
         dest="num_workers",
         type=int,

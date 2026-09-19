@@ -212,7 +212,8 @@ def parse_arguments():
             "real",
             "largeobj",
             "microwave",
-            "allstable"], default="table",
+            "allstable",
+            "conveyor"], default="table",
     )
     parser.add_argument(
         "--robot", choices=["panda", "ur10", "fetch"], default="panda"

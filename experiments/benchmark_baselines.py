@@ -19,11 +19,19 @@ from coad.adaptation import DMPAdapter, TrajOptAdapter
 # from coad.task_space import deep_tuple
 from experiments.visualize_paths import traj_len
 from coad.utils import set_seed, load_env_and_robot, get_data_folder
-from coad.planning import OMPLPlanner, euclidean_path_length
+from coad.planning import OMPLPlanner, VAMPPlanner, euclidean_path_length
 
-from coad.env import FreeEnv, CageEnv, BoxEnv, TableEnv, ShelfEnv, LargeObjectEnv, MicrowaveEnv, AllStableEnv
+from coad.env import (
+    FreeEnv,
+    CageEnv,
+    BoxEnv,
+    TableEnv,
+    ShelfEnv,
+    LargeObjectEnv,
+    MicrowaveEnv,
+    AllStableEnv,
+)
 from coad.robot import Panda, UR10, FetchArm
-
 
 folder1 = "dataset/top_naive"
 folder2 = "dataset/top"
@@ -195,10 +203,10 @@ class Library:
         solved_key_list = list(solved_keys)
 
         self.library = {}
-        pbar_library = tqdm(total=N, desc="Building library", leave=True)
+        pbar_library = tqdm(total=N, desc="Building Lightning", leave=True)
 
         iters = 0
-        while len(self.library) <= N:
+        while len(self.library) < N:
             iters += 1
 
             random_key = solved_key_list[
@@ -622,7 +630,10 @@ def evaluate_graph(
 ):
     model, data = robot.model, robot.data
     home_qpos = robot.get_joint_qpos()
-    ik_solver = get_ik_solver(robot, env_collision_geoms=env.collision_geoms)
+    ik_solver = get_ik_solver(
+        robot,
+        env_collision_geoms=env.env_details["collision_geoms"],
+    )
     solved_task_paths_keys = [
         k
         for k, path in task_paths.items()
@@ -694,6 +705,10 @@ def evaluate_graph(
     rrtc_lengths = []
     rrtc_solve_times = []
 
+    vamp_success = []
+    vamp_lengths = []
+    vamp_solve_times = []
+
     solved_keys = solved_task_paths_keys
 
     # indexer = BoxGrid(key_to_root)
@@ -703,11 +718,19 @@ def evaluate_graph(
         ompl_planner = OMPLPlanner(robot, data, rrtc_range=0.1)
     else:
         ompl_planner = OMPLPlanner(robot, data)
+    vamp_planner = VAMPPlanner(
+        robot,
+        env,
+        data,
+        robot_name=args.robot,
+    )
     # ompl_planner = OMPLPlanner(robot, data)
 
-    # Building library baseline with N = full library size
-    N = len(solved_task_paths_keys)
-    print("\n=== Building library ===")
+    # Sample N object poses, matching the largest compressed library.
+    N = max(len(root_paths) for root_paths in root_paths_list)
+    if isinstance(env, MicrowaveEnv):
+        N = min(N, 50000)
+    print("\n=== Building Lightning ===")
     library = Library(
         N,
         env,
@@ -792,7 +815,21 @@ def evaluate_graph(
 
         rrtc_solve_times.append(planning_time)
 
-        # Library baseline
+        # VAMP RRT-Connect on the same sampled goal. Invalid states count as
+        # failures so every method remains aligned to the same queries.
+        vamp_path, vamp_time, vamp_status = vamp_planner.plan(
+            start=home_qpos,
+            goal=key_goal,
+            smooth_path=False,
+            num_waypoints=200,
+            benchmark=True,
+        )
+        vamp_ok = vamp_status == "success" and vamp_path.size > 0
+        vamp_success.append(vamp_ok)
+        vamp_solve_times.append(vamp_time)
+        vamp_lengths.append(traj_len(vamp_path) if vamp_ok else np.nan)
+
+        # Lightning
         library_path, library_time, lib_query_success = library.solve(sample)
 
         library_success.append(lib_query_success)
@@ -810,14 +847,20 @@ def evaluate_graph(
     rrtc_times = np.array(rrtc_solve_times)
     rrtc_lengths = np.array(rrtc_lengths)
 
+    vamp_success = np.array(vamp_success)
+    vamp_times = np.array(vamp_solve_times)
+    vamp_lengths = np.array(vamp_lengths)
+
     library_success = np.array(library_success)
     library_times = np.array(library_times)
     library_lengths = np.array(library_lengths)
 
     rrtc_success_rate = np.mean(rrtc_success) * 100
+    vamp_success_rate = np.mean(vamp_success) * 100
     library_success_rate = np.mean(library_success) * 100
 
     rrtc_times_succ = rrtc_times[rrtc_success]
+    vamp_times_succ = vamp_times[vamp_success]
     library_times_succ = library_times[library_success]
 
     # ---- RRTConnect ----
@@ -827,7 +870,14 @@ def evaluate_graph(
     mean_rrtc_length = np.nanmean(rrtc_lengths)
     std_rrtc_length = np.nanstd(rrtc_lengths, ddof=1)
 
-    # ---- Library baseline ----
+    # ---- VAMP RRTConnect ----
+    mean_vamp_time_ms = np.nanmean(vamp_times_succ) * 1000
+    std_vamp_time_ms = np.nanstd(vamp_times_succ, ddof=1) * 1000
+
+    mean_vamp_length = np.nanmean(vamp_lengths)
+    std_vamp_length = np.nanstd(vamp_lengths, ddof=1)
+
+    # ---- Lightning ----
     mean_library_time_ms = np.nanmean(library_times_succ) * 1000
     std_library_time_ms = np.nanstd(library_times_succ, ddof=1) * 1000
 
@@ -843,13 +893,24 @@ def evaluate_graph(
         f"Mean RRTConnect length: {mean_rrtc_length:.6f} ± {std_rrtc_length:.6f}"
     )
 
-    print("\n=== Library baseline results ===")
-    print(f"Library success rate: {library_success_rate:.2f}%")
+    print("\n=== VAMP RRTConnect results ===")
+    print(f"VAMP RRTConnect success rate: {vamp_success_rate:.2f}%")
     print(
-        f"Mean library time: {mean_library_time_ms:.3f} ± {std_library_time_ms:.3f} ms"
+        f"Mean VAMP RRTConnect time: {mean_vamp_time_ms:.3f} ± "
+        f"{std_vamp_time_ms:.3f} ms"
     )
     print(
-        f"Mean library length: {mean_library_length:.6f} ± {std_library_length:.6f}"
+        f"Mean VAMP RRTConnect length: {mean_vamp_length:.6f} ± "
+        f"{std_vamp_length:.6f}"
+    )
+
+    print("\n=== Lightning results ===")
+    print(f"Lightning success rate: {library_success_rate:.2f}%")
+    print(
+        f"Mean Lightning time: {mean_library_time_ms:.3f} ± {std_library_time_ms:.3f} ms"
+    )
+    print(
+        f"Mean Lightning length: {mean_library_length:.6f} ± {std_library_length:.6f}"
     )
 
     for adaptation in adaptations:
@@ -888,6 +949,11 @@ def evaluate_graph(
             "success": rrtc_success,
             "times": rrtc_times,
             "lengths": rrtc_lengths,
+        },
+        "vamp": {
+            "success": vamp_success,
+            "times": vamp_times,
+            "lengths": vamp_lengths,
         },
         "library": {
             "success": library_success,
@@ -977,38 +1043,12 @@ def main(args):
         )
     print(f"Adaptations found: {adaptations_found}")
 
-    env_name = args.env
-    robot_name = args.robot
-    visualize = False
-
-    if env_name == "table":
-        env = TableEnv(robot_name, using_swept_volume=False)
-    elif env_name == "box":
-        env = BoxEnv(robot_name, using_swept_volume=False)
-    elif env_name == "cage":
-        env = CageEnv(robot_name, using_swept_volume=False)
-    elif env_name == "shelf":
-        env = ShelfEnv(robot_name, using_swept_volume=False)
-    elif env_name == "free":
-        env = FreeEnv(robot_name, using_swept_volume=False)
-    elif env_name == "largeobj":
-        env = LargeObjectEnv(robot_name, using_swept_volume=False)
-    else:
-        raise ValueError(f"Invalid environment: {env_name}")
-
-    model, data = env.model, env.data
-    if robot_name == "panda":
-        robot = Panda(model, data, visualize)
-    elif robot_name == "ur10":
-        robot = UR10(model, data, visualize)
-    elif robot_name == "fetch":
-        robot = FetchArm(model, data, visualize)
-    else:
-        raise ValueError(f"Invalid robot: {robot_name}")
-
-    robot_pos = env.env_details['robot_pos']
-    robot_quat = env.env_details['robot_quat']
-    robot.teleport_base(pos=robot_pos, quat=robot_quat)
+    env, robot = load_env_and_robot(
+        args.env,
+        args.robot,
+        visualize=False,
+        swept_vlume=False,
+    )
 
     # root_data = pickle.load(open(root_path, "rb"))
     # map_data = pickle.load(open(map_path, "rb"))
@@ -1025,7 +1065,6 @@ def main(args):
     # planning_results_path = f"{folder}/task_paths_results_neighbor_RRTConnect.npy"
     # planning_results = np.load(planning_results_path)
 
-    num_samples = 1000
     evaluate_graph(
         args,
         env,
@@ -1034,8 +1073,9 @@ def main(args):
         task_set,
         task_paths,
         adaptations_found,
-        num_samples,
+        args.num_samples,
     )
+    robot.close()
 
 
 def parse_arguments():
@@ -1043,7 +1083,8 @@ def parse_arguments():
     # envs
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument(
-        "--env", choices=[
+        "--env",
+        choices=[
             "table",
             "box",
             "cage",
@@ -1051,8 +1092,10 @@ def parse_arguments():
             "free",
             "largeobj",
             "microwave",
-            "allstable"
-            ], default="table",
+            "allstable",
+            "conveyor",
+        ],
+        default="table",
     )
     parser.add_argument(
         "--robot", choices=["panda", "ur10", "fetch"], default="panda"
@@ -1067,6 +1110,8 @@ def parse_arguments():
         "--adaptation", choices=["linear", "grr", "dmp", "opt"], default="grr"
     )
     parser.add_argument("--n_neighbors", type=int, default=1000)
+    parser.add_argument("--num-samples", type=int, default=1000)
+    parser.add_argument("--seed", type=int, default=42)
 
     args = parser.parse_args()
     return args
@@ -1074,4 +1119,5 @@ def parse_arguments():
 
 if __name__ == "__main__":
     args = parse_arguments()
+    set_seed(args.seed)
     main(args)

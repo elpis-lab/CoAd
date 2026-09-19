@@ -158,7 +158,7 @@ class Library:
         solved_key_list = list(solved_keys)
 
         self.library = {}
-        pbar_library = tqdm(total=N, desc="Building library", leave=True)
+        pbar_library = tqdm(total=N, desc="Building Lightning", leave=True)
 
         while len(self.library) < N:
             random_key = solved_key_list[
@@ -659,7 +659,7 @@ def main(args):
     else:
         ompl_planner = OMPLPlanner(robot, mujoco_data)
 
-    print("\nBuilding library baseline...")
+    print("\nBuilding Lightning...")
     library = Library(
         N=len(solved_task_paths_keys),
         env=env,

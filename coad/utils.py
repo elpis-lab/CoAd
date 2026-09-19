@@ -13,7 +13,8 @@ from coad.env import (
     RealEnv,
     LargeObjectEnv,
     MicrowaveEnv,
-    AllStableEnv
+    AllStableEnv,
+    ConveyorEnv,
 )
 from coad.robot import MujocoRobot, Panda, UR10, FetchArm
 
@@ -52,37 +53,45 @@ def get_data_folder(env_name: str, robot_name: str) -> str:
 
 
 def load_env_and_robot(
-    env_name: str, robot_name: str, visualize: bool = True
+    env_name: str,
+    robot_name: str,
+    visualize: bool = True,
+    swept_vlume: bool = True,
+    compute_tcr: bool = True,
 ) -> tuple[MujocoEnv, MujocoRobot]:
     # Build scene for given environment
     if env_name == "table":
-        env = TableEnv(robot_name)
+        env = TableEnv(robot_name, swept_vlume=swept_vlume)
     elif env_name == "box":
-        env = BoxEnv(robot_name)
+        env = BoxEnv(robot_name, swept_vlume=swept_vlume)
     elif env_name == "cage":
-        env = CageEnv(robot_name)
+        env = CageEnv(robot_name, swept_vlume=swept_vlume)
     elif env_name == "shelf":
-        env = ShelfEnv(robot_name)
+        env = ShelfEnv(robot_name, swept_vlume=swept_vlume)
     elif env_name == "free":
-        env = FreeEnv(robot_name)
+        env = FreeEnv(robot_name, swept_vlume=swept_vlume)
     elif env_name == "real":
-        env = RealEnv(robot_name)
+        env = RealEnv(robot_name, swept_vlume=swept_vlume)
     elif env_name == "largeobj":
-        env = LargeObjectEnv(robot_name)
+        env = LargeObjectEnv(robot_name, swept_vlume=swept_vlume)
     elif env_name == "microwave":
-        env = MicrowaveEnv(robot_name)
+        env = MicrowaveEnv(
+            robot_name, swept_vlume=swept_vlume, compute_tcr=compute_tcr
+        )
     elif env_name == "allstable":
-        env = AllStableEnv(robot_name)
+        env = AllStableEnv(robot_name, swept_vlume=swept_vlume)
+    elif env_name == "conveyor":
+        env = ConveyorEnv(robot_name, swept_vlume=swept_vlume)
     else:
         raise ValueError(f"Invalid environment: {env_name}")
 
     # Configure problem home pose
     NEW_ENVS = [LargeObjectEnv, AllStableEnv, MicrowaveEnv]
-    
+
     # Change fetch_table start config
     if robot_name == "fetch":
         NEW_ENVS.append(TableEnv)
-    
+
     NEW_ENVS = tuple(NEW_ENVS)
     home_pose_flag = "new" if isinstance(env, NEW_ENVS) else "default"
 
@@ -97,7 +106,10 @@ def load_env_and_robot(
     else:
         raise ValueError(f"Invalid robot: {robot_name}")
 
-    robot_pos = env.env_details['robot_pos']
-    robot_quat = env.env_details['robot_quat']
+    robot_pos = env.env_details["robot_pos"]
+    robot_quat = env.env_details["robot_quat"]
     robot.teleport_base(pos=robot_pos, quat=robot_quat)
+    if hasattr(env, "home_qpos"):
+        robot.set_joint_qpos(env.home_qpos)
+        robot.home_pos = env.home_qpos.copy()
     return env, robot

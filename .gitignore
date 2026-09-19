@@ -19,3 +19,9 @@ venv/
 data/
 *.pkl
 *.npy
+
+# Generated MuJoCo scenes and temporary meshes
+temp/
+/assets/**/temp/
+/assets/*/temp_scene*.xml
+/assets/*/*_scene_[0-9]*.xml

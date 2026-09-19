@@ -514,7 +514,8 @@ def parse_arguments():
             "real",
             "largeobj",
             "microwave",
-            "allstable"],
+            "allstable",
+            "conveyor"],
         default="table",
     )
     parser.add_argument(
@@ -524,7 +525,11 @@ def parse_arguments():
         "--ik", choices=["random", "neighbor", "grr"], default="neighbor"
     )
     parser.add_argument(
-        "--num_workers", type=int, default=2, help="number of parallel IK worker processes"
+        "--num_workers",
+        dest="num_workers",
+        type=int,
+        default=2,
+        help="number of parallel IK worker processes",
     )
 
     args = parser.parse_args()

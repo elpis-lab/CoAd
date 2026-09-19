@@ -496,6 +496,7 @@ def parse_arguments():
             "largeobj",
             "microwave",
             "allstable",
+            "conveyor",
         ],
         default="table",
     )
@@ -515,7 +516,6 @@ def parse_arguments():
         default="RRTConnect",
     )
     parser.add_argument(
-        "--num-workers",
         "--num_workers",
         dest="num_workers",
         type=int,
