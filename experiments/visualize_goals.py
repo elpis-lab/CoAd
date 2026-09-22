@@ -195,18 +195,6 @@ def task_boundaries(env):
             for region in regions for z in heights]
 
 
-def sample_boundary_height(env, face, pose):
-    """Match the object's bottom to its table, shelf, or other support surface."""
-    size = env.object_details["size"]
-    if face:
-        height = size[{"xy": 2, "yz": 0, "zx": 1}[face]]
-    else:
-        height = size[1] if env.object_details["type"] == "cylinder" else size[2]
-    bottom = pose[2] - height / 2
-    supports = np.asarray(env.env_details.get("z_correction", [0]))
-    return float(supports[np.argmin(np.abs(supports - bottom))]) + BOUNDARY_CLEARANCE
-
-
 def main(args):
     source_robot = args.robot if args.robot != "none" else args.task_robot
     env, robot = load_env_and_robot(args.env, source_robot, False, False, False)
@@ -216,7 +204,7 @@ def main(args):
         robot.set_joint_qpos(robot.home_pos)
     tasks = load_tasks(args.env, source_robot, env)
     boundaries = task_boundaries(env)
-    print("Red: XY task domain and sampled TCR. Close the viewer to quit.")
+    print("Red: XY task domain. Close the viewer to quit.")
     try:
         with mujoco.viewer.launch_passive(env.model, env.data) as viewer:
             set_camera(viewer)
@@ -231,8 +219,6 @@ def main(args):
                         viewer.user_scn.ngeom = 0
                         for xy, z in boundaries:
                             rectangle(viewer.user_scn, xy, z, BOUNDARY_COLOR)
-                        rectangle(viewer.user_scn, tcr[:2], sample_boundary_height(env, face, pose),
-                                  BOUNDARY_COLOR)
                     next_sample = time.monotonic() + args.interval
                 viewer.sync()
                 time.sleep(1 / 60)
