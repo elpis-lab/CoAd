@@ -1,7 +1,7 @@
 # Experiments
 
-The entry points below replace the separate baseline, experience, conveyor, and
-special-environment scripts. Existing planning and adaptation implementations are
+The entry points below share existing planning and adaptation implementations.
+The conveyor runner adds timed physical execution to the static benchmarks. Implementations are
 shared rather than copied into each script.
 
 | Task | Entry point |
@@ -11,6 +11,7 @@ shared rather than copied into each script.
 | Adaptation/compression table | `summarize_adaptations.py` |
 | Planning table | `summarize_planning.py` |
 | Planning quality and time plots | `plot_planning.py` |
+| Moving conveyor pick-and-sort experiment | `run_conveyor_experiment.py` |
 | Environment viewer / transparent screenshot | `visualize_env.py` |
 | Live path comparison / saved-path replay | `visualize_paths.py` |
 

@@ -27,6 +27,25 @@ SCENES = {
 }
 
 
+def scene_color(name):
+    """Shared scene palette for visualization and live conveyor execution."""
+    if name.startswith("box_"):
+        color = "0.9 0.6 0.2 1"
+    elif "splitter" in name:
+        color = "0.5 0.5 0.5 1"
+    elif name in (
+        "conveyor_top",
+        "conveyor_end1",
+        "conveyor_end2",
+    ):
+        color = "0.15 0.18 0.2 1"
+    elif name.startswith("table_"):
+        color = "0.6 0.45 0.3 1"
+    else:
+        color = "0.5 0.55 0.6 1"
+    return color
+
+
 def _yaml_scene_root(scene_yaml):
     """Build XML using full box lengths, [height, radius] cylinders, XYZW poses."""
     with Path(scene_yaml).open() as stream:
@@ -91,20 +110,7 @@ def _yaml_scene_root(scene_yaml):
         primitives, poses = obj["primitives"], obj["primitive_poses"]
         if len(primitives) != len(poses):
             raise ValueError(f"{name}: each primitive needs a pose")
-        if name.startswith("box_"):
-            color = "0.9 0.6 0.2 1"
-        elif "splitter" in name:
-            color = "0.5 0.5 0.5 1"
-        elif name in (
-            "conveyor_top",
-            "conveyor_end1",
-            "conveyor_end2",
-        ):
-            color = "0.15 0.18 0.2 1"
-        elif name.startswith("table_"):
-            color = "0.6 0.45 0.3 1"
-        else:
-            color = "0.5 0.55 0.6 1"
+        color = scene_color(name)
         for index, (primitive, pose) in enumerate(zip(primitives, poses)):
             kind = primitive["type"].lower()
             dims = primitive["dimensions"]
