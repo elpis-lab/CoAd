@@ -98,7 +98,12 @@ def add_dataset_args(parser):
         default="grr",
         help="Compressed library supplying query regions/goals and experiences",
     )
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for task sampling and planners (default: 42)",
+    )
 
 
 def dataset_folder(args):
