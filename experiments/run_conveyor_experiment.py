@@ -31,11 +31,17 @@ def parse_arguments(argv=None):
     add_dataset_args(p)
     p.set_defaults(env="conveyor")
     p.add_argument("--methods", nargs="+", choices=METHODS, default=["grr"])
-    p.add_argument("--objects", type=positive_int, default=9)
+    p.add_argument("--objects", type=positive_int, default=3)
     p.add_argument(
-        "--speed", type=float, default=0.15, help="Belt speed in m/s along +Y"
+        "--speed",
+        type=float,
+        help="Belt speed in m/s along +Y (default: Panda .07, Fetch .05)",
     )
-    p.add_argument("--spawn-interval", type=float, default=4.0)
+    p.add_argument(
+        "--spawn-interval",
+        type=float,
+        help="Parcel period in seconds (default: Panda 7, Fetch 9)",
+    )
     p.add_argument(
         "--grasp-region",
         nargs=4,
@@ -46,15 +52,18 @@ def parse_arguments(argv=None):
     p.add_argument(
         "--approach-seconds",
         type=float,
-        default=0.7,
-        help="Fixed approach duration; departure is scheduled to meet the intercept",
+        help="Fixed approach duration (default: Panda 1, Fetch 2.5)",
     )
-    p.add_argument("--transfer-seconds", type=float, default=0.7)
+    p.add_argument(
+        "--transfer-seconds",
+        type=float,
+        help="Fixed loaded transfer duration (default: Panda 1, Fetch 2.5)",
+    )
     p.add_argument(
         "--return-seconds",
         type=float,
-        default=0.4,
-        help="Empty-arm return duration after release; loaded transfers use --transfer-seconds",
+        default=0.8,
+        help="Fixed empty return duration",
     )
     p.add_argument("--settle-seconds", type=float, default=0.1)
     p.add_argument(
@@ -69,14 +78,14 @@ def parse_arguments(argv=None):
         default=0.05,
         help="Raise the entire robot mounting base in world Z (m), preserving library joint poses",
     )
-    p.add_argument(
-        "--home-lift",
-        type=float,
-        default=0.0,
-        help="Optional additional home-only lift (m); normally use --base-lift",
-    )
     p.add_argument("--gripper-seconds", type=float, default=0.10)
-    p.add_argument("--descent-seconds", type=float, default=0.10)
+    p.add_argument("--descent-seconds", type=float, default=0.20)
+    p.add_argument(
+        "--grasp-height",
+        type=float,
+        default=None,
+        help="Final tool height for grasping (default: .810 m)",
+    )
     p.add_argument(
         "--lift-height",
         type=float,
@@ -89,6 +98,12 @@ def parse_arguments(argv=None):
     p.add_argument("--library-k", type=positive_int, default=5)
     p.add_argument("--headless", action="store_true")
     p.add_argument(
+        "--wait-for-enter",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Wait for Enter after opening the viewer (default: enabled)",
+    )
+    p.add_argument(
         "--realtime",
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -100,7 +115,7 @@ def parse_arguments(argv=None):
         help="NPZ cache of three fixed home-to-slot paths",
     )
     p.add_argument(
-        "--output", type=Path, default=REPO / "results/conveyor.json"
+        "--output", type=Path, default=REPO / "data/exp_conveyor.json"
     )
     args = p.parse_args(argv)
     if args.realtime is None:
@@ -109,6 +124,26 @@ def parse_arguments(argv=None):
         p.error(
             "the calibrated conveyor supports --robot panda or fetch and --env conveyor"
         )
+    motion_defaults = (
+        dict(
+            speed=0.07,
+            spawn_interval=9.0,
+            approach_seconds=2.0,
+            transfer_seconds=2.0,
+        )
+        if args.robot == "fetch"
+        else dict(
+            speed=0.15,
+            spawn_interval=5.5,
+            approach_seconds=1.0,
+            transfer_seconds=1.0,
+        )
+    )
+    for name, value in motion_defaults.items():
+        if getattr(args, name) is None:
+            setattr(args, name, value)
+    if args.grasp_height is None:
+        args.grasp_height = 0.810
     for name in (
         "speed",
         "spawn_interval",
@@ -122,10 +157,11 @@ def parse_arguments(argv=None):
         "lift_height",
         "lift_seconds",
         "descent_seconds",
+        "grasp_height",
     ):
         if not np.isfinite(getattr(args, name)) or getattr(args, name) <= 0:
             p.error(f"--{name.replace('_', '-')} must be finite and positive")
-    for name in ("base_lift", "home_lift"):
+    for name in ("base_lift",):
         if not np.isfinite(getattr(args, name)) or getattr(args, name) < 0:
             p.error(
                 f"--{name.replace('_', '-')} must be finite and nonnegative"
@@ -303,35 +339,72 @@ def raise_base(args, env, robot):
     robot.teleport_base(position, env.env_details["robot_quat"])
 
 
-def raise_home(args, env, robot, validator):
+def plan_pick(args, bench, method, sample, reference):
+    """Solve the method path and one joint-space goal for the downward motion."""
     from coad.mink_ik import get_ik_solver
 
-    target = robot.get_ee_pose()
-    target[2] += args.home_lift
-    ok, home = get_ik_solver(robot).solve(
-        target, current=robot.get_joint_qpos()
-    )
-    if not ok or not validator.validity_checker(
-        validator.numpy_to_state(home)
-    ):
-        raise RuntimeError("Could not find a collision-free raised home pose")
-    env.home_qpos = np.asarray(home).copy()
-    robot.set_joint_qpos(home)
-    return env.home_qpos.copy()
-
-
-def plan_pick(bench, method, sample, reference):
-    """The selected method is the complete online planning operation."""
     started = time.perf_counter()
     path, seconds, target = bench.solve(method, sample, reference)
+    grasp = None
+    if path is not None and len(path) >= 2:
+        bench.robot.set_joint_qpos(target)
+        grasp_pose = bench.robot.get_ee_pose()
+        grasp_pose[2] = args.grasp_height
+        reached, grasp = get_ik_solver(bench.robot).solve(
+            grasp_pose, current=target
+        )
+        if not reached:
+            grasp = None
     return (
         path,
         target,
+        grasp,
         dict(
             planning_seconds=seconds,
             planning_wall_seconds=time.perf_counter() - started,
         ),
     )
+
+
+def select_square_tcr(bench, sample):
+    """Select an equivalent, reachable TCR without changing its stored goal."""
+    candidates = []
+    first_y = float(sample[1])
+    y_values = np.array([first_y])
+    for y in y_values:
+        for offset in (0.0, np.pi / 2):
+            candidate = np.asarray(sample, dtype=float).copy()
+            candidate[1] = y
+            candidate[3] = (
+                (sample[3] + offset + np.pi / 2) % np.pi
+            ) - np.pi / 2
+            key = bench.reference_index.query_point(candidate)
+            if key is None or bench.reference_map[key][1] is None:
+                continue
+            goal = np.asarray(bench.reference_map[key][1])
+            bench.robot.set_joint_qpos(goal)
+            fingers = []
+            for joint_name in bench.robot.FINGER:
+                joint = bench.robot.model.joint(joint_name).id
+                body = bench.robot.model.jnt_bodyid[joint]
+                fingers.append(bench.robot.data.xpos[body, :2].copy())
+            axis = fingers[1] - fingers[0]
+            axis /= np.linalg.norm(axis)
+            tool = bench.robot.get_ee_pose()[:2]
+            offset_xy = candidate[:2] - tool
+            perpendicular = abs(
+                axis[0] * offset_xy[1] - axis[1] * offset_xy[0]
+            )
+            # For a square parcel, yaw + pi/2 is the same physical pose. Choose
+            # the equivalent entry with better finger engagement and a shorter
+            # stored root, while keeping the earliest intercept position.
+            score = np.linalg.norm(goal - bench.home) + 25 * perpendicular
+            candidates.append((score, candidate, key))
+    bench.robot.set_joint_qpos(bench.home)
+    if not candidates:
+        return sample, None
+    _, candidate, key = min(candidates, key=lambda item: item[0])
+    return candidate, key
 
 
 class Simulation:
@@ -449,8 +522,15 @@ class Simulation:
             import mujoco.viewer
 
             self.viewer = mujoco.viewer.launch_passive(model, data)
-            self.viewer.cam.lookat[:] = [0.5, 0.35, 0.8]
+            # Table-side overview: table in front, robot behind, and the full
+            # conveyor workspace visible from roughly 30 degrees above.
+            self.viewer.cam.lookat[:] = [0.55, 0.20, 0.80]
             self.viewer.cam.distance = 2.5
+            self.viewer.cam.azimuth = -180
+            self.viewer.cam.elevation = -25
+            self.viewer.sync()
+            if args.wait_for_enter:
+                input("Conveyor ready. Press Enter to start the simulation...")
         self.wall_start = time.perf_counter()
         self.frames = 0
 
@@ -566,23 +646,47 @@ class Simulation:
                 position - self.data.site_xpos[site], orientation_error
             ]
             qvelocity = self.data.qvel[self.robot.joint_dof_ids]
-            previous = getattr(self, "cartesian_jacobian", jac)
-            bias = ((jac - previous) / self.model.opt.timestep) @ qvelocity
+            # A nearly exact inverse is very noisy around weak Cartesian
+            # directions, especially for Fetch's redundant torso/arm chain.
+            # Use a damped least-squares inverse and bounded operational-space
+            # acceleration.  Differencing J at the 1 ms physics rate made the
+            # old Jdot*qdot estimate amplify contact and integration noise.
+            damping = 0.04 if self.args.robot == "fetch" else 0.02
             inverse = jac.T @ np.linalg.solve(
-                jac @ jac.T + 1e-8 * np.eye(6), np.eye(6)
+                jac @ jac.T + damping**2 * np.eye(6), np.eye(6)
             )
             task_acceleration = (
                 desired_acceleration
-                + 2500 * error
-                + 100 * (desired_velocity - jac @ qvelocity)
-                - bias
+                + np.r_[
+                    1200 * error[:3],
+                    500 * error[3:],
+                ]
+                + np.r_[
+                    70 * (desired_velocity[:3] - (jac @ qvelocity)[:3]),
+                    45 * (desired_velocity[3:] - (jac @ qvelocity)[3:]),
+                ]
             )
+            task_acceleration[:3] = np.clip(task_acceleration[:3], -40, 40)
+            task_acceleration[3:] = np.clip(task_acceleration[3:], -80, 80)
             posture = acceleration[self.robot.joint_dof_ids].copy()
-            acceleration[self.robot.joint_dof_ids] = (
+            acceleration[self.robot.joint_dof_ids] = np.clip(
                 inverse @ task_acceleration
-                + (np.eye(self.robot.n_joints) - inverse @ jac) @ posture
+                + (np.eye(self.robot.n_joints) - inverse @ jac) @ posture,
+                -120,
+                120,
             )
-            self.cartesian_jacobian = jac
+
+        # Cubic interpolation through dense adapted paths can contain very large
+        # local derivatives even when its positions are continuous.  Bound the
+        # physical servo acceleration so those interpolation artifacts cannot
+        # produce visible one-step kicks.  Fetch needs the tighter limit because
+        # its redundant torso/arm chain includes three wide-range roll joints.
+        arm_acceleration_limit = 400 if self.args.robot == "fetch" else 250
+        acceleration[self.robot.joint_dof_ids] = np.clip(
+            acceleration[self.robot.joint_dof_ids],
+            -arm_acceleration_limit,
+            arm_acceleration_limit,
+        )
 
         self.mj.mj_mulM(self.model, self.data, self.mass_force, acceleration)
         self.data.qfrc_applied[:] = 0
@@ -705,8 +809,6 @@ class Simulation:
             )
             self.step()
         self.cartesian_command = None
-        if hasattr(self, "cartesian_jacobian"):
-            del self.cartesian_jacobian
         self.command = self.robot.get_joint_qpos().copy()
         self.command_velocity[:] = 0
         self.command_acceleration[:] = 0
@@ -892,27 +994,7 @@ def run_method(args, method):
     try:
         raise_base(args, env, robot)
         bench = Benchmark(args, env, robot)
-        home = (
-            raise_home(args, env, robot, bench.validator)
-            if args.home_lift
-            else bench.home.copy()
-        )
-        # Libraries retain their original start. Connect the raised execution
-        # home offline instead of deforming every method's returned path.
-        if args.home_lift:
-            bridge, _, _ = bench.validator.plan(
-                home,
-                bench.home,
-                timeout=args.timeout,
-                smooth_path=True,
-                num_waypoints=50,
-                benchmark=True,
-            )
-            if bridge is None:
-                raise RuntimeError("Could not prepare raised-home connection")
-            bridge = np.asarray(bridge)
-        else:
-            bridge = home[None, :]
+        home = bench.home.copy()
         bench.setup([method])
         drop_paths = placements(args, env, robot, bench.validator, home)
         rng = np.random.default_rng(args.seed)
@@ -976,6 +1058,14 @@ def run_method(args, method):
                     if intercept_y is None:
                         report_skip(method, record, "missed_deadline")
                         break
+                    detected_sample = np.array(
+                        [detected[0], intercept_y, 0.77, yaw]
+                    )
+                    sample, key = select_square_tcr(bench, detected_sample)
+                    if key is None:
+                        report_skip(method, record, "outside_library")
+                        break
+                    intercept_y = float(sample[1])
                     arrival = now + (intercept_y - detected[1]) / args.speed
                     clear_at = earliest_isolated_start(
                         i,
@@ -995,37 +1085,41 @@ def run_method(args, method):
                 if record["status"] != "pending":
                     break
                 closing_at = arrival - 0.5 * args.gripper_seconds
-                sample = np.array([detected[0], intercept_y, 0.77, yaw])
                 record.update(
                     detection=detected,
                     detection_time=now,
                     predicted_pose=sample.tolist(),
+                    detected_predicted_pose=detected_sample.tolist(),
                     arrival=arrival,
                     region_clear_at=clear_at,
                     intercept_attempts=record["intercept_attempts"] + 1,
                 )
-                key = bench.reference_index.query_point(sample)
                 if key is None or bench.reference_map[key][1] is None:
                     report_skip(method, record, "outside_library")
                     break
-                path, target, diagnostics = sim.plan_while_running(
-                    executor,
-                    plan_pick,
-                    bench,
-                    method,
-                    sample.copy(),
-                    bench.reference_map[key][1],
+                path, target, grasp_target, diagnostics = (
+                    sim.plan_while_running(
+                        executor,
+                        plan_pick,
+                        args,
+                        bench,
+                        method,
+                        sample.copy(),
+                        bench.reference_map[key][1],
+                    )
                 )
                 record.update(diagnostics)
                 planning_budget = max(
                     0.002, diagnostics["planning_wall_seconds"] * 1.25
                 )
-                if path is None or len(path) < 2:
+                if path is None or len(path) < 2 or grasp_target is None:
+                    if grasp_target is None:
+                        record["failure_detail"] = "descent_ik_failed"
                     report_skip(method, record, "planning_failed")
                     break
                 # Keep the method output and its stored configuration-space goal
-                # unchanged. Only prepend the fixed, offline home connection.
-                path = np.vstack((bridge[:-1], np.asarray(path)))
+                # unchanged.
+                path = np.asarray(path)
                 sim.wait_until(clear_at)
                 approach_seconds = approach_timing(
                     sim.data.time,
@@ -1037,28 +1131,22 @@ def run_method(args, method):
                     break
             if record["status"] != "pending":
                 continue
-            record["approach_execution_seconds"] = approach_seconds
-            departure = (
-                closing_at - args.descent_seconds - approach_seconds - 0.02
-            )
+            record["approach_execution_seconds"] = args.approach_seconds
+            # Stage at the earliest TCR as soon as it is safe. Any remaining
+            # intercept time is spent at pre-grasp rather than hidden at home.
+            departure = sim.data.time
             record["wait_at_home_seconds"] = max(
                 0.0, departure - sim.data.time
             )
             sim.wait_until(departure)
             record["approach_started_at"] = float(sim.data.time)
-            sim.execute(np.asarray(path, dtype=float), approach_seconds)
-            record["wait_at_grasp_seconds"] = max(
-                0.0, closing_at - args.descent_seconds - sim.data.time
-            )
-            sim.wait_until(closing_at - args.descent_seconds)
+            sim.execute(np.asarray(path, dtype=float), args.approach_seconds)
             robot.set_joint_qpos(target)
             ee_target = robot.get_ee_pose()
-            # TCRs may vary tool pose; check actual tool position against planned pose.
             ee_actual = sim.robot.get_ee_pose()
             if (
                 not sim.reached(target)
                 or np.linalg.norm(ee_actual[:3] - ee_target[:3]) > 0.015
-                or np.linalg.norm(ee_actual[:2] - ee_target[:2]) > 0.015
             ):
                 report_skip(method, record, "tracking_failed")
                 sim.execute(path[::-1], args.transfer_seconds)
@@ -1068,26 +1156,26 @@ def run_method(args, method):
                         "Tracking recovery failed to reach home"
                     )
                 continue
-            else:
-                record["tool_before_descent"] = (
-                    sim.robot.get_ee_pose().tolist()
-                )
-                sim.vertical(0.795, args.descent_seconds)
-                record["tool_after_descent"] = sim.robot.get_ee_pose().tolist()
-                record["closing_started_at"] = float(sim.data.time)
-                record["object_at_closing_start"] = sim.object_pose(i).tolist()
-                sim.gripper(closed=True)
-                record["tool_after_closure"] = sim.robot.get_ee_pose().tolist()
-                record["gripper_closed_at"] = float(sim.data.time)
-                record["object_at_closing_end"] = sim.object_pose(i).tolist()
-                record["finger_contacts"] = sim.finger_contacts(i)
-                record["status"] = (
-                    "grasp_candidate"
-                    if sim.confirm_grasp(i)
-                    else "grasp_failed"
-                )
-            # Lift the payload clear of the belt, then return to the raised home.
-            sim.vertical(float(ee_target[2]), args.lift_seconds)
+            record["wait_at_grasp_seconds"] = max(
+                0.0, closing_at - args.descent_seconds - sim.data.time
+            )
+            sim.wait_until(closing_at - args.descent_seconds)
+            record["tool_before_descent"] = sim.robot.get_ee_pose().tolist()
+            descent = np.asarray([target, grasp_target])
+            sim.execute(descent, args.descent_seconds)
+            record["tool_after_descent"] = sim.robot.get_ee_pose().tolist()
+            record["closing_started_at"] = float(sim.data.time)
+            record["object_at_closing_start"] = sim.object_pose(i).tolist()
+            sim.gripper(closed=True)
+            record["tool_after_closure"] = sim.robot.get_ee_pose().tolist()
+            record["gripper_closed_at"] = float(sim.data.time)
+            record["object_at_closing_end"] = sim.object_pose(i).tolist()
+            record["finger_contacts"] = sim.finger_contacts(i)
+            record["status"] = (
+                "grasp_candidate" if sim.confirm_grasp(i) else "grasp_failed"
+            )
+            # Reverse the same joint-space segment for the lift.
+            sim.execute(descent[::-1], args.lift_seconds)
             record["object_after_lift"] = sim.object_pose(i).tolist()
             if sim.held == i:
                 if sim.object_pose(i)[2] < 0.78 or sim.finger_contacts(i) < 2:
@@ -1102,6 +1190,8 @@ def run_method(args, method):
                 raise RuntimeError(
                     "Failed to return home; stopping instead of executing an invalid start"
                 )
+            record["object_at_home"] = sim.object_pose(i).tolist()
+            record["finger_contacts_at_home"] = sim.finger_contacts(i)
             if sim.held == i and (
                 sim.finger_contacts(i) < 2
                 or np.linalg.norm(
