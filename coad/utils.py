@@ -11,6 +11,10 @@ from coad.env import (
     ShelfEnv,
     FreeEnv,
     RealEnv,
+    LargeObjectEnv,
+    MicrowaveEnv,
+    AllStableEnv,
+    ConveyorEnv,
 )
 from coad.robot import MujocoRobot, Panda, UR10, FetchArm
 
@@ -49,34 +53,52 @@ def get_data_folder(env_name: str, robot_name: str) -> str:
 
 
 def load_env_and_robot(
-    env_name: str, robot_name: str, visualize: bool = True
+    env_name: str,
+    robot_name: str,
+    visualize: bool = True,
+    using_swept_volume: bool = True,
+    compute_tcr: bool = True,
 ) -> tuple[MujocoEnv, MujocoRobot]:
-    # Build scene for given environment
-    if env_name == "table":
-        env = TableEnv(robot_name)
-    elif env_name == "box":
-        env = BoxEnv(robot_name)
-    elif env_name == "cage":
-        env = CageEnv(robot_name)
-    elif env_name == "shelf":
-        env = ShelfEnv(robot_name)
-    elif env_name == "free":
-        env = FreeEnv(robot_name)
-    elif env_name == "real":
-        env = RealEnv(robot_name)
-    else:
+    # Keep one constructor path so optional flags reach every environment.
+    environments = {
+        "table": TableEnv, "box": BoxEnv, "cage": CageEnv,
+        "shelf": ShelfEnv, "free": FreeEnv, "real": RealEnv,
+        "largeobj": LargeObjectEnv, "microwave": MicrowaveEnv,
+        "allstable": AllStableEnv, "conveyor": ConveyorEnv,
+    }
+    if env_name not in environments:
         raise ValueError(f"Invalid environment: {env_name}")
+    env = environments[env_name](
+        robot_name, using_swept_volume=using_swept_volume, compute_tcr=compute_tcr
+    )
+
+    # Configure problem home pose
+    NEW_ENVS = [LargeObjectEnv, AllStableEnv, MicrowaveEnv]
+
+    # Change fetch_table start config
+    if robot_name == "fetch":
+        NEW_ENVS.append(TableEnv)
+
+    NEW_ENVS = tuple(NEW_ENVS)
+    home_pose_flag = "new" if isinstance(env, NEW_ENVS) else "default"
 
     # Create robot instance
     model, data = env.model, env.data
     if robot_name == "panda":
-        robot = Panda(model, data, visualize)
+        robot = Panda(model, data, visualize, home_pose=home_pose_flag)
     elif robot_name == "ur10":
         robot = UR10(model, data, visualize)
     elif robot_name == "fetch":
-        robot = FetchArm(model, data, visualize)
+        robot = FetchArm(model, data, visualize, home_pose=home_pose_flag)
     else:
         raise ValueError(f"Invalid robot: {robot_name}")
 
-    robot.teleport_base(pos=env.robot_pos, quat=env.robot_quat)
+    robot_pos = env.env_details["robot_pos"]
+    robot_quat = env.env_details["robot_quat"]
+    robot.teleport_base(pos=robot_pos, quat=robot_quat)
+    if hasattr(env, "home_qpos"):
+        robot.set_joint_qpos(env.home_qpos)
+        robot.home_pos = env.home_qpos.copy()
+    if using_swept_volume:
+        robot.tcr_env = env
     return env, robot

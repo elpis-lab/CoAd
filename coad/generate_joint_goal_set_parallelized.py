@@ -18,6 +18,8 @@ from coad.task_space import build_task_nn, key_to_center, split_key, has_contact
 from coad.mink_ik import get_ik_solver
 from coad.mujoco_utils import sample_qpos
 
+from concurrent.futures import ProcessPoolExecutor
+import multiprocessing as mp
 
 def get_ik_reference(robot: MujocoRobot, key, attempts, ik_method, **kwargs):
     """Get a reference for IK solving"""
@@ -131,6 +133,7 @@ def convert_task_to_joint_goal(
     task_set,
     ik_method,
     ik_max_attempts=20,
+    worker_id=0,
     use_col=False,
     **kwargs,
 ):
@@ -170,6 +173,9 @@ def convert_task_to_joint_goal(
                     if key[0] == face
                 }
 
+                if len(face_task_set) == 0:
+                    continue
+
                 nn, _ = build_task_nn(face_task_set)
 
                 nn_by_face[face] = nn
@@ -199,7 +205,16 @@ def convert_task_to_joint_goal(
         raise ValueError(f"Invalid IK method: {ik_method}")
 
     # Start sovling IK one by one
-    pbar = tqdm(enumerate[Any](task_set), total=len(task_set))
+    # pbar = tqdm(enumerate[Any](task_set), total=len(task_set))
+
+    pbar = tqdm(
+        enumerate(task_set),
+        total=len(task_set),
+        desc=f"Worker {worker_id}",
+        position=worker_id,
+        dynamic_ncols=True,
+    )
+
     for i, key in pbar:
         # Moving object (swept volume) to given key pose
         env.move_swept_volume(key)
@@ -211,9 +226,6 @@ def convert_task_to_joint_goal(
         # # object pose
         # key_arr = np.array(key)
         # key_center = (key_arr[:, 0] + key_arr[:, 1]) / 2
-        
-        # if (i % 15000 == 0):
-        #     print(f"key: {key}")
 
         original_key = key
 
@@ -270,24 +282,175 @@ def convert_task_to_joint_goal(
             joint_goal_set[key] = solution
 
         # Update viewer
-        if robot.viewer is not None and valid_ik:
+        if robot.viewer is not None:
             robot.viewer.sync()
-            input("IK Success. Proceed?")
+            # input("Proceed?")
 
         # Update tqdm message periodically
         print_interval = 1000
         if (i + 1) % print_interval == 0:
             m_ik = np.nanmean(ik_times[np.array(ik_success)])
             tqdm.write(
-                f"[{i+1}] "
+                f"Worker {worker_id}: [{i+1}] "
                 f"IK Success: {np.sum(ik_success)/(i+1):.3f} | "
-                f"IK Time: {m_ik:.4f}s | "
+                f"IK Time: {m_ik:.4f}s"
             )
 
     # Stack results (n, 2)
     results = np.stack([ik_success, ik_times], axis=1)
     return joint_goal_set, results
 
+def solve_task_set_chunk(
+    env_name,
+    robot_name,
+    task_set_chunk,
+    ik_method,
+    ik_max_attempts,
+    worker_id
+):
+    set_seed(42 + worker_id)
+    env, robot = load_env_and_robot(
+        env_name,
+        robot_name,
+        visualize=False
+    )
+
+    env.load_tcr_metadata(f"{get_data_folder(env_name, robot_name)}/task_set.tcr.json")
+    try:
+        joint_goal_set, results = convert_task_to_joint_goal(
+            env,
+            robot,
+            task_set_chunk,
+            ik_method,
+            ik_max_attempts=ik_max_attempts,
+            worker_id=worker_id
+        )
+    finally:
+        robot.close()
+    
+    return list(task_set_chunk.keys()), joint_goal_set, results
+
+
+def split_task_set(task_set, num_workers):
+    
+    if not isinstance(num_workers, int):
+        raise TypeError(f"Unsupported data type for num_workers: {type(num_workers)}")
+    if num_workers < 1:
+        raise ValueError("num_workers must be at least 1")
+    
+    keys = list(task_set.keys())
+    num_workers = min(num_workers, len(keys))
+
+    print(f"Length of task set: {len(keys)}")
+    index_chunks = np.array_split(
+        np.arange(len(keys)),
+        num_workers,
+    )
+
+    task_set_chunks = []
+    for index_chunk in index_chunks:
+        chunk = {
+            keys[i]: task_set[keys[i]]
+            for i in index_chunk
+        }
+        task_set_chunks.append(chunk)
+
+    return task_set_chunks
+
+def run_parallel_ik(
+    task_set_chunks,
+    args,
+):
+    mp_context = mp.get_context("spawn")
+
+    with ProcessPoolExecutor(
+        max_workers=len(task_set_chunks),
+        mp_context=mp_context
+    ) as executor:
+        
+        futures = []
+
+        for worker_id, task_set_chunk in enumerate(task_set_chunks):
+            future = executor.submit(
+                solve_task_set_chunk,
+                args.env,
+                args.robot,
+                task_set_chunk,
+                args.ik,
+                30,
+                worker_id,
+            )
+            futures.append(future)
+        
+        worker_outputs = [
+            future.result()
+            for future in futures
+        ]
+
+    return worker_outputs
+
+def consolidate_worker_outputs(task_set, worker_outputs):
+    """Merge worker outputs while preserving the original task-set order."""
+
+    joint_goal_set = {
+        key: None
+        for key in task_set
+    }
+
+    results_by_key = {}
+
+    print(f"Original task count: {len(task_set)}")
+    print(f"Worker output count: {len(worker_outputs)}")
+
+    for worker_id, worker_output in enumerate(worker_outputs):
+        chunk_keys, local_joint_goal_set, local_results = worker_output
+
+        chunk_keys = list(chunk_keys)
+
+        print(
+            f"Worker {worker_id}: "
+            f"{len(chunk_keys)} keys, "
+            f"{len(local_joint_goal_set)} solutions, "
+            f"{len(local_results)} result rows"
+        )
+
+        if len(chunk_keys) != len(local_results):
+            raise RuntimeError(
+                f"Worker {worker_id} returned "
+                f"{len(chunk_keys)} keys but "
+                f"{len(local_results)} result rows"
+            )
+
+        joint_goal_set.update(local_joint_goal_set)
+
+        for key, result in zip(chunk_keys, local_results):
+            results_by_key[key] = result
+
+    print(f"Consolidated result count: {len(results_by_key)}")
+
+    missing_keys = [
+        key
+        for key in task_set
+        if key not in results_by_key
+    ]
+
+    if missing_keys:
+        print(f"First missing key: {missing_keys[0]}")
+        print(
+            "First returned key: "
+            f"{next(iter(results_by_key), None)}"
+        )
+
+        raise RuntimeError(
+            f"Missing worker results for {len(missing_keys)} tasks"
+        )
+
+    results = np.asarray(
+        [results_by_key[key] for key in task_set],
+        dtype=float,
+    )
+
+    return joint_goal_set, results
 
 def main(args):
     """Generate a dataset of task paths for a given environment and robot."""
@@ -304,7 +467,7 @@ def main(args):
         return
 
     # Load environment and robot
-    env, robot = load_env_and_robot(args.env, args.robot, visualize=False)
+    # env, robot = load_env_and_robot(args.env, args.robot, visualize=False)
 
     # Solve problems
     # Load the task set
@@ -316,22 +479,27 @@ def main(args):
             f"Task set not found! "
             + "Generate the task set with generate_task_set.py."
         )
-        robot.close()
+        # robot.close()
         return
 
-    env.load_tcr_metadata(f"{folder}/task_set.tcr.json")
+    # Batch task set and create parallel workers
+    task_set_chunks = split_task_set(task_set, args.num_workers)
+    worker_outputs = run_parallel_ik(task_set_chunks, args)
 
-    # Convert task set to joint goal set
-    joint_goal_set, results = convert_task_to_joint_goal(
-        env, robot, task_set, args.ik, ik_max_attempts=30
+    joint_goal_set, results = consolidate_worker_outputs(
+        task_set,
+        worker_outputs
     )
+
 
     # Save results
     np.save(f"{folder}/joint_goal_set_results_{suffix}.npy", results)
-    pickle.dump(
-        joint_goal_set, open(f"{folder}/joint_goal_set_{suffix}.pkl", "wb")
-    )
-    robot.close()
+    # pickle.dump(
+    #     joint_goal_set, open(f"{folder}/joint_goal_set_{suffix}.pkl", "wb")
+    # )
+    with open(f"{folder}/joint_goal_set_{suffix}.pkl", "wb") as file:
+        pickle.dump(joint_goal_set, file)
+    # robot.close()
 
 
 def parse_arguments():
@@ -349,7 +517,8 @@ def parse_arguments():
             "real",
             "largeobj",
             "microwave",
-            "allstable"],
+            "allstable",
+            "conveyor"],
         default="table",
     )
     parser.add_argument(
@@ -357,6 +526,13 @@ def parse_arguments():
     )
     parser.add_argument(
         "--ik", choices=["random", "neighbor", "grr"], default="neighbor"
+    )
+    parser.add_argument(
+        "--num_workers",
+        dest="num_workers",
+        type=int,
+        default=2,
+        help="number of parallel IK worker processes",
     )
 
     args = parser.parse_args()

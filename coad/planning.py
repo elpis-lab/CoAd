@@ -10,6 +10,593 @@ import ompl.util as ou
 
 import mujoco
 from coad.robot import MujocoRobot
+from scipy.spatial import cKDTree
+
+import vamp
+from scipy.spatial.transform import Rotation
+
+_OMPL_USES_NANOBIND = not hasattr(ob, "StateValidityCheckerFn")
+
+
+def _make_ompl_state(space):
+    """Allocate a mutable state with either OMPL Python binding API."""
+    if _OMPL_USES_NANOBIND:
+        return space.allocState()
+    return ob.State(space)
+
+
+def _state_pointer(state):
+    """Return the state representation expected by low-level OMPL methods."""
+    if _OMPL_USES_NANOBIND:
+        return state
+    return state()
+
+
+class VAMPPlanner:
+    def __init__(
+        self,
+        robot: MujocoRobot,
+        env,
+        data=None,
+        robot_name=None,
+        sampler_name="halton",
+        log=False,
+    ):
+        if vamp is None:
+            raise ImportError(
+                "VAMPPlanner requires the optional 'vamp' Python bindings."
+            )
+        self.robot = robot
+        self.model = robot.model
+        self.data = data if data is not None else mujoco.MjData(self.model)
+
+        if data is None:
+            self.data.qpos[:] = robot.data.qpos[:]
+
+        self.n_dof = robot.n_joints
+        robot_name = robot_name or env.env_details["robot"]
+        self.robot_name = robot_name
+        self.vamp_robot_name = (
+            "panda_corrected" if robot_name == "panda" else robot_name
+        )
+        self.env = env
+
+        (
+            self.vamp_robot,
+            self.planner_fn,
+            self.plan_settings,
+            self.simplify_settings,
+        ) = vamp.configure_robot_and_planner_with_kwargs(
+            self.vamp_robot_name,
+            "rrtc",
+        )
+
+        print(
+            f"VAMP robot: {self.vamp_robot_name}, "
+            f"module: {self.vamp_robot}"
+        )
+
+        self.sampler = getattr(
+            self.vamp_robot,
+            sampler_name,
+        )()
+
+        # Robot base transforms
+        self.base_pos_world = np.asarray(
+            env.env_details["robot_pos"],
+            dtype=float,
+        )
+
+        self.base_quat_world = np.asarray(
+            env.env_details["robot_quat"],
+            dtype=float,
+        )
+        quat_wxyz = self.base_quat_world
+        quat_xyzw = np.array(
+            [
+                quat_wxyz[1],
+                quat_wxyz[2],
+                quat_wxyz[3],
+                quat_wxyz[0],
+            ],
+            dtype=float,
+        )
+        self.base_rot_world = Rotation.from_quat(quat_xyzw).as_matrix()
+
+        self.environment = self.build_environment(verbose=True)
+        # raise NotImplementedError("VAMP not yet implemented.")
+
+    def world_pose_to_base(self, world_pos, world_rot):
+        world_pos = np.asarray(world_pos, dtype=float)
+        world_rot = np.asarray(world_rot, dtype=float).reshape(3, 3)
+
+        # R_WB maps base-frame vectors into world frame.
+        # Therefore, R_BW = R_WB.T.
+        base_rot_inv = self.base_rot_world.T
+
+        base_pos = base_rot_inv @ (world_pos - self.base_pos_world)
+
+        base_rot = base_rot_inv @ world_rot
+
+        return base_pos, base_rot
+
+    def build_environment(self, verbose=False):
+        vamp_env = vamp.Environment()
+
+        mujoco.mj_forward(self.model, self.data)
+
+        for geom_id in range(self.model.ngeom):
+            if geom_id in self.robot.robot_geoms:
+                continue
+
+            geom_type = self.model.geom_type[geom_id]
+
+            world_pos = self.data.geom_xpos[geom_id].copy()
+            world_rot = self.data.geom_xmat[geom_id].reshape(3, 3).copy()
+            size = self.model.geom_size[geom_id].copy()
+
+            geom_name = mujoco.mj_id2name(
+                self.model,
+                mujoco.mjtObj.mjOBJ_GEOM,
+                geom_id,
+            )
+
+            # print(
+            #     f"VAMP geom {geom_id}: "
+            #     f"name={geom_name}, type={geom_type}",
+            #     flush=True,
+            # )
+
+            if geom_name == "cube_object_geom":
+                continue
+
+            if geom_type == mujoco.mjtGeom.mjGEOM_PLANE:
+                continue
+                floor_half_height = 0.05
+                floor_clearance = 0.1 if self.robot_name == "fetch" else 0.0
+
+                # Create the finite floor cuboid in world coordinates.
+                floor_world_pos = world_pos.copy()
+                floor_normal_world = world_rot[:, 2]
+
+                # Place the cuboid beneath the original plane.
+                # floor_world_pos -= (
+                #     floor_half_height * floor_normal_world
+                # )
+                floor_world_pos -= (
+                    floor_half_height + floor_clearance
+                ) * floor_normal_world
+
+                base_pos, base_rot = self.world_pose_to_base(
+                    floor_world_pos,
+                    world_rot,
+                )
+
+                base_euler = Rotation.from_matrix(base_rot).as_euler("xyz")
+
+                vamp_env.add_cuboid(
+                    vamp.Cuboid(
+                        base_pos.tolist(),
+                        base_euler.tolist(),
+                        [5.0, 5.0, floor_half_height],
+                    )
+                )
+
+            elif geom_type == mujoco.mjtGeom.mjGEOM_BOX:
+                # continue
+                base_pos, base_rot = self.world_pose_to_base(
+                    world_pos,
+                    world_rot,
+                )
+
+                base_euler = Rotation.from_matrix(base_rot).as_euler("xyz")
+
+                vamp_env.add_cuboid(
+                    vamp.Cuboid(
+                        base_pos.tolist(),
+                        base_euler.tolist(),
+                        size[:3].tolist(),
+                    )
+                )
+            elif geom_type == mujoco.mjtGeom.mjGEOM_CYLINDER:
+                base_pos, base_rot = self.world_pose_to_base(
+                    world_pos,
+                    world_rot,
+                )
+
+                base_euler = Rotation.from_matrix(base_rot).as_euler("xyz")
+
+                radius = float(size[0])
+                length = 2.0 * float(size[1])
+
+                cylinder = vamp.Cylinder(
+                    base_pos.tolist(),
+                    base_euler.tolist(),
+                    radius,
+                    length,
+                )
+
+                vamp_env.add_capsule(cylinder)
+
+            elif geom_type == mujoco.mjtGeom.mjGEOM_MESH:
+                # continue
+                geom_name = mujoco.mj_id2name(
+                    self.model,
+                    mujoco.mjtObj.mjOBJ_GEOM,
+                    geom_id,
+                )
+                # Skip robot meshes
+                if geom_name is None:
+                    continue
+
+                primitive_list = self.env.swept_volume_primitives.get(
+                    geom_name
+                )
+
+                if primitive_list is None:
+                    continue
+
+                if verbose:
+                    print(f"Adding mesh geom: {geom_name}")
+                    print(f"Number of mesh primitives: {len(primitive_list)}")
+
+                geom_world_pos = self.data.geom_xpos[geom_id].copy()
+
+                geom_world_rot = (
+                    self.data.geom_xmat[geom_id].reshape(3, 3).copy()
+                )
+
+                for primitive in primitive_list:
+                    self._add_saved_primitive(
+                        vamp_env=vamp_env,
+                        primitive=primitive,
+                        geom_world_pos=geom_world_pos,
+                        geom_world_rot=geom_world_rot,
+                    )
+
+                continue
+
+            else:
+                continue
+
+            # print(
+            #     geom_id,
+            #     self.model.geom_type[geom_id],
+            #     self.model.geom_size[geom_id],
+            #     mujoco.mj_id2name(
+            #         self.model,
+            #         mujoco.mjtObj.mjOBJ_GEOM,
+            #         geom_id,
+            #     ),
+            # )
+
+        return vamp_env
+
+    def _add_saved_primitive(
+        self,
+        vamp_env,
+        primitive,
+        geom_world_pos,
+        geom_world_rot,
+    ):
+        primitive_type = primitive["type"]
+
+        if primitive_type not in {"cuboid", "cylinder"}:
+            raise ValueError(
+                "Unsupported saved primitive type: " f"{primitive_type}"
+            )
+
+        primitive_local_pos = np.asarray(
+            primitive["position"],
+            dtype=float,
+        )
+
+        primitive_local_rot = np.asarray(
+            primitive["orientation"],
+            dtype=float,
+        ).reshape(3, 3)
+
+        # Geom-local primitive pose -> MuJoCo world pose.
+        primitive_world_pos = (
+            geom_world_pos + geom_world_rot @ primitive_local_pos
+        )
+
+        primitive_world_rot = geom_world_rot @ primitive_local_rot
+
+        # MuJoCo world pose -> robot-base/VAMP pose.
+        base_pos, base_rot = self.world_pose_to_base(
+            primitive_world_pos,
+            primitive_world_rot,
+        )
+
+        base_euler = Rotation.from_matrix(base_rot).as_euler("xyz")
+
+        if primitive_type == "cuboid":
+            half_extents = np.asarray(
+                primitive["half_extents"],
+                dtype=float,
+            )
+
+            vamp_env.add_cuboid(
+                vamp.Cuboid(
+                    base_pos.tolist(),
+                    base_euler.tolist(),
+                    half_extents.tolist(),
+                )
+            )
+
+        elif primitive_type == "cylinder":
+            radius = float(primitive["radius"])
+            length = float(primitive["length"])
+
+            cylinder = vamp.Cylinder(
+                base_pos.tolist(),
+                base_euler.tolist(),
+                radius,
+                length,
+            )
+
+            # This is the method already used for ordinary
+            # MuJoCo cylinder geoms.
+            vamp_env.add_capsule(cylinder)
+
+    def plan(
+        self,
+        start,
+        goal,
+        smooth_path=True,
+        num_waypoints=200,
+        benchmark=False,
+        log=False,
+    ):
+
+        # Setup environment for VAMP again (moved goal object)
+        self.environment = self.build_environment()
+
+        start = np.asarray(start, dtype=float).tolist()
+        goal = np.asarray(goal, dtype=float).tolist()
+
+        start_valid = self.vamp_robot.validate(start, self.environment)
+        goal_valid = self.vamp_robot.validate(goal, self.environment)
+
+        # if not start_valid:
+        #     print("\nVAMP invalid start:", np.asarray(start))
+        #     print(
+        #         "VAMP start collision debug:",
+        #         self.vamp_robot.debug(start, self.environment),
+        #         flush=True,
+        #     )
+
+        # if not goal_valid:
+        #     print("\nVAMP invalid goal:", np.asarray(goal))
+        #     print(
+        #         "VAMP goal collision debug:",
+        #         self.vamp_robot.debug(goal, self.environment),
+        #         flush=True,
+        #     )
+
+        # print(f"VAMP start valid: {start_valid}", flush=True)
+        # print(f"VAMP goal valid: {goal_valid}", flush=True)
+
+        if len(start) != self.vamp_robot.dimension():
+            raise ValueError(
+                f"Expected {self.vamp_robot.dimension()} joints, "
+                f"got {len(start)}"
+            )
+
+        if not start_valid:
+            empty = np.empty((0, self.n_dof), dtype=np.float32)
+            return empty, 0.0, "invalid_start"
+
+        if not goal_valid:
+            # print(f"VAMP: Goal invalid")
+            empty = np.empty((0, self.n_dof), dtype=np.float32)
+            return empty, 0.0, "invalid_goal"
+
+        t0 = time.perf_counter()
+
+        result = self.planner_fn(
+            start,
+            goal,
+            self.environment,
+            self.plan_settings,
+            self.sampler,
+        )
+
+        # planning_time = time.perf_counter() - t0
+        planning_time = result.nanoseconds * 1e-9
+
+        if not result.solved:
+            empty = np.empty((0, self.n_dof), dtype=np.float32)
+            return empty, planning_time, "no_solution"
+
+        if result is None or result.path is None:
+            return empty, planning_time, "no_solution"
+
+        path = result.path
+
+        if smooth_path:
+            simplified = self.vamp_robot.simplify(
+                path,
+                self.environment,
+                self.simplify_settings,
+                self.sampler,
+            )
+            path = simplified.path
+
+        if num_waypoints is not None:
+            path.interpolate_to_n_states(int(num_waypoints))
+
+        waypoints = np.asarray(
+            path.numpy(),
+            dtype=np.float32,
+        )
+
+        if waypoints.ndim != 2 or waypoints.shape[1] != self.n_dof:
+            raise RuntimeError(
+                f"Unexpected VAMP path shape: {waypoints.shape}"
+            )
+
+        total_time = time.perf_counter() - t0
+
+        if log:
+            print(f"VAMP planning time: {planning_time:.6f} s")
+            print(f"VAMP total time: {total_time:.6f} s")
+            print(f"VAMP path shape: {waypoints.shape}")
+
+        return waypoints, planning_time, "success"
+
+    # def plan(
+    #     self,
+    #     start,
+    #     goal,
+    #     smooth_path=True,
+    #     num_waypoints=200,
+    #     benchmark=False,
+    #     log=False,
+    #     timeout=3.0,
+    # ):
+    #     """Plan from start to goal using repeated VAMP attempts.
+
+    #     Args:
+    #         start: Start joint configuration.
+    #         goal: Goal joint configuration.
+    #         smooth_path: Whether to simplify the resulting path.
+    #         num_waypoints: Number of states in the interpolated path.
+    #         benchmark: Retained for compatibility with the evaluation code.
+    #         log: Whether to print timing and attempt information.
+    #         timeout: Maximum wall-clock planning budget in seconds.
+
+    #     Returns:
+    #         waypoints: Array with shape (N, n_dof), or an empty array on failure.
+    #         planning_time: Wall-clock time spent attempting to plan.
+    #     """
+
+    #     if timeout <= 0:
+    #         raise ValueError(f"timeout must be positive, got {timeout}")
+
+    #     # Rebuild the VAMP environment because the goal object may have moved.
+    #     self.environment = self.build_environment()
+
+    #     start = np.asarray(start, dtype=float).tolist()
+    #     goal = np.asarray(goal, dtype=float).tolist()
+
+    #     expected_dimension = self.vamp_robot.dimension()
+
+    #     if len(start) != expected_dimension:
+    #         raise ValueError(
+    #             f"Expected {expected_dimension} start joints, "
+    #             f"got {len(start)}"
+    #         )
+
+    #     if len(goal) != expected_dimension:
+    #         raise ValueError(
+    #             f"Expected {expected_dimension} goal joints, "
+    #             f"got {len(goal)}"
+    #         )
+
+    #     empty = np.empty((0, self.n_dof), dtype=np.float32)
+
+    #     start_valid = self.vamp_robot.validate(
+    #         start,
+    #         self.environment,
+    #     )
+    #     goal_valid = self.vamp_robot.validate(
+    #         goal,
+    #         self.environment,
+    #     )
+
+    #     if not start_valid:
+    #         if log:
+    #             print("VAMP start state is invalid.")
+    #         # print("VAMP: Start invalid")
+    #         return empty, 0.0
+
+    #     if not goal_valid:
+    #         if log:
+    #             print("VAMP goal state is invalid.")
+    #         # print("VAMP: Goal invalid")
+    #         return empty, 0.0
+
+    #     # Start the timeout after environment construction and state validation.
+    #     planning_start = time.perf_counter()
+    #     deadline = planning_start + timeout
+
+    #     result = None
+    #     attempts = 0
+    #     solver_time = 0.0
+
+    #     while time.perf_counter() < deadline:
+    #         attempts += 1
+
+    #         attempt_result = self.planner_fn(
+    #             start,
+    #             goal,
+    #             self.environment,
+    #             self.plan_settings,
+    #             self.sampler,
+    #         )
+
+    #         if attempt_result is None:
+    #             continue
+
+    #         solver_time += attempt_result.nanoseconds * 1e-9
+
+    #         if attempt_result.solved and attempt_result.path is not None:
+    #             result = attempt_result
+    #             break
+
+    #     if attempts > 1:
+    #         print(f"VAMP attempts: {attempts}")
+    #     planning_time = time.perf_counter() - planning_start
+
+    #     if result is None:
+    #         if log:
+    #             print(f"VAMP failed after {attempts} attempts.")
+    #             print(f"Solver time: {solver_time:.6f} s")
+    #             print(f"Wall planning time: {planning_time:.6f} s")
+
+    #         return empty, solver_time
+
+    #     path = result.path
+
+    #     # Planning timeout applies only to finding a solution.
+    #     # Simplification and interpolation happen afterward.
+    #     postprocess_start = time.perf_counter()
+
+    #     if smooth_path:
+    #         simplified = self.vamp_robot.simplify(
+    #             path,
+    #             self.environment,
+    #             self.simplify_settings,
+    #             self.sampler,
+    #         )
+
+    #         if simplified is not None and simplified.path is not None:
+    #             path = simplified.path
+
+    #     if num_waypoints is not None:
+    #         path.interpolate_to_n_states(int(num_waypoints))
+
+    #     waypoints = np.asarray(
+    #         path.numpy(),
+    #         dtype=np.float32,
+    #     )
+
+    #     if waypoints.ndim != 2 or waypoints.shape[1] != self.n_dof:
+    #         raise RuntimeError(
+    #             f"Unexpected VAMP path shape: {waypoints.shape}"
+    #         )
+
+    #     postprocess_time = time.perf_counter() - postprocess_start
+    #     total_time = planning_time + postprocess_time
+
+    #     if log:
+    #         print(f"VAMP attempts: {attempts}")
+    #         print(f"Solver time: {solver_time:.6f} s")
+    #         print(f"Wall time: {time.perf_counter() - planning_start:.6f} s")
+
+    #     return waypoints, solver_time
 
 
 class OMPLPlanner:
@@ -46,9 +633,14 @@ class OMPLPlanner:
         # Set up OMPL planner
         self.planner_name = planner
         self.ss, self.si = self.set_up_ompl()
+        self.si.setStateValidityCheckingResolution(0.005)
+
         self.planner = self.ss.getPlanner()
         if not log:
             ou.setLogLevel(ou.LOG_ERROR)
+
+        self.query_states = []
+        self.goal_vertices = []
 
     def set_up_ompl(self):
         """Setup OMPL planner"""
@@ -67,9 +659,10 @@ class OMPLPlanner:
         si.setStateValidityCheckingResolution(0.01)
 
         # State validity checker
-        ss.setStateValidityChecker(
-            ob.StateValidityCheckerFn(self.validity_checker)
-        )
+        validity_checker = self.validity_checker
+        if not _OMPL_USES_NANOBIND:
+            validity_checker = ob.StateValidityCheckerFn(validity_checker)
+        ss.setStateValidityChecker(validity_checker)
 
         # Optimization objective (default path length)
         ss.setOptimizationObjective(ob.PathLengthOptimizationObjective(si))
@@ -98,17 +691,18 @@ class OMPLPlanner:
     ):
 
         # Set up start and goal states
-        start_state = ob.State(self.si.getStateSpace())
-        goal_state = ob.State(self.si.getStateSpace())
+        start_state = _make_ompl_state(self.si.getStateSpace())
+        goal_state = _make_ompl_state(self.si.getStateSpace())
         for i_q in range(self.n_dof):
             start_state[i_q] = float(start[i_q])
             goal_state[i_q] = float(goal[i_q])
         self.ss.setStartAndGoalStates(start_state, goal_state)
 
         # Solve
+        waypoints = np.empty((0, self.n_dof), dtype=np.float32)
         t0 = time.perf_counter()
-        waypoints = []
         status = self.ss.solve(float(timeout))
+
         if status.asString() == "Exact solution":
             if log:
                 print("Path solution found.")
@@ -135,13 +729,13 @@ class OMPLPlanner:
             if log:
                 print("Path planning failed.")
 
+        planning_time = self.ss.getLastPlanComputationTime()
         self.ss.clear()
         if benchmark:
             t1 = time.perf_counter()
             # total time: plan + simplify + interpolation
-            total_time = round(t1 - t0, 5)
+            total_time = t1 - t0
             # planning time: time spent in planning
-            planning_time = self.ss.getLastPlanComputationTime()
             return waypoints, total_time, planning_time
         return waypoints
 
@@ -154,93 +748,53 @@ class OMPLPlanner:
             "PRM" in self.planner_name
         ), f"Planner {self.planner_name} is not supported."
 
-        # Set start and a dummy goal (same as start)
-        # so ProblemDefinition is valid.
-        start_state = ob.State(self.si.getStateSpace())
+        self.start_np = np.asarray(start, dtype=float).copy()
+
+        self.start_state = _make_ompl_state(self.si.getStateSpace())
         for i in range(self.n_dof):
-            start_state[i] = float(start[i])
-        self.ss.setStartAndGoalStates(start_state, start_state)
+            self.start_state[i] = float(start[i])
 
         # Start growing the roadmap
+        self.ss.setStartAndGoalStates(self.start_state, self.start_state)
         self.ss.setup()
         ter = ob.timedPlannerTerminationCondition(float(timeout))
         self.planner.constructRoadmap(ter)
 
-    def query(
-        self,
-        start,
-        goal,
-        timeout=10.0,
-        smooth_path=True,
-        num_waypoints=200,
-        benchmark=False,
-        check_time_freq=1e-3,
-    ):
-        """
-        Solve a start-goal query using the pre-built roadmap from
-        sample_for_batch_planning. Reuses the roadmap; call clearQuery
-        between queries to clear only the previous start/goal.
-        """
-        assert (
-            "PRM" in self.planner_name
-        ), f"Planner {self.planner_name} is not supported."
+        # Boost.Python exposed PRM::addMilestone; OMPL 2's nanobind API does
+        # not. Query states are connected to the extracted graph below, so a
+        # persistent start milestone is optional.
+        if hasattr(self.planner, "addMilestone"):
+            self.v_start = self.planner.addMilestone(
+                _state_pointer(self.start_state)
+            )
+        else:
+            self.v_start = None
 
-        # Clear previous query (start/goal) but keep the roadmap
-        self.planner.clearQuery()
+        # print("start milestone added")
+        # print("milestones:", n0, "->", self.planner.milestoneCount())
+        # print("edges:", e0, "->", self.planner.edgeCount())
+        print(
+            f"Roadmap edge count after construction: {self.planner.edgeCount()}"
+        )
 
-        # Set new start and goal
-        start_state = ob.State(self.si.getStateSpace())
-        goal_state = ob.State(self.si.getStateSpace())
-        for i in range(self.n_dof):
-            start_state[i] = float(start[i])
-            goal_state[i] = float(goal[i])
-        self.ss.setStartAndGoalStates(start_state, goal_state)
+        # print("Building python graph...")
 
-        # TODO
-        # need customized OMPL implementation here
-        t0 = time.perf_counter()
-        waypoints = []
-        timeout_c = time.perf_counter()
-        status_str = ""
-        while status_str != "Exact solution":
-            status = self.ss.solve(check_time_freq)
-            status_str = status.asString()
-            if time.perf_counter() - timeout_c > float(timeout):
-                break
+        self.build_graph_from_planner_data()
 
-        # Check collision since environment is changed
-        valid_path = False
-        if status.asString() == "Exact solution":
-            valid_path = True
-            path = self.ss.getSolutionPath()
-            for state in path.getStates():
-                if not self.validity_checker(state):
-                    valid_path = False
-                    break
+        # print("Done building Python graph.")
 
-        if status.asString() == "Exact solution" and valid_path:
-            path = self.ss.getSolutionPath()
-            if smooth_path:
-                ps = og.PathSimplifier(self.si)
-                try:
-                    ps.ropeShortcutPath(path)
-                except Exception:
-                    ps.shortcutPath(path)
-                ps.smoothBSpline(path)
-            if num_waypoints is not None:
-                path.interpolate(int(num_waypoints))
-            states = path.getStates()
-            waypoints = [
-                np.array([s[i] for i in range(self.n_dof)], dtype=float)
-                for s in states
-            ]
+    def validate_path(self, path):
+        states = path.getStates()
 
-        if benchmark:
-            t1 = time.perf_counter()
-            total_time = round(t1 - t0, 5)
-            planning_time = self.ss.getLastPlanComputationTime()
-            return waypoints, total_time, planning_time
-        return waypoints
+        for s in states:
+            if not self.si.satisfiesBounds(s) or not self.validity_checker(s):
+                return False
+
+        for s1, s2 in zip(states[:-1], states[1:]):
+            if not self.si.checkMotion(s1, s2):
+                return False
+
+        return True
 
     def validity_checker(self, state):
         """Check if the state is valid"""
@@ -251,6 +805,417 @@ class OMPLPlanner:
         # Check for collisions
         in_contact = self.robot.in_contact()
         return not in_contact
+
+    def build_graph_from_planner_data(self):
+        pd = ob.PlannerData(self.si)
+        self.planner.getPlannerData(pd)
+        pd.computeEdgeWeights()
+
+        n = pd.numVertices()
+        vertices = np.zeros((n, self.n_dof), dtype=np.float64)
+        adjacency = [[] for _ in range(n)]
+
+        # Extract vertices
+        for i in range(n):
+            s = pd.getVertex(i).getState()
+            vertices[i] = [s[j] for j in range(self.n_dof)]
+
+        # Extract edges
+        for i in range(n):
+            if _OMPL_USES_NANOBIND:
+                edge_list = pd.getEdges(i)
+            else:
+                edge_list = ou.vectorUint()
+                pd.getEdges(i, edge_list)
+
+            for j in edge_list:
+                j = int(j)
+                try:
+                    w = pd.getEdgeWeight(i, j).value()
+                except Exception:
+                    w = np.linalg.norm(vertices[i] - vertices[j])
+
+                adjacency[i].append((j, float(w)))
+
+        self.planner_data = pd
+        self.graph_vertices = vertices
+        self.graph_adj = adjacency
+        self.vertex_tree = cKDTree(self.graph_vertices)
+
+        print("Graph vertices:", n)
+        print("Graph edges directed:", sum(len(a) for a in adjacency))
+
+    def connect_temp_config(self, q, k=30):
+        q = np.asarray(q, dtype=float)
+
+        k = min(k, len(self.graph_vertices))
+        dists, nbrs = self.vertex_tree.query(q, k=k)
+
+        # cKDTree returns scalars when k == 1
+        dists = np.atleast_1d(dists)
+        nbrs = np.atleast_1d(nbrs)
+
+        edges = []
+        q_state = self.numpy_to_state(q)
+
+        for dist, j in zip(dists, nbrs):
+            j = int(j)
+            qj_state = self.numpy_to_state(self.graph_vertices[j])
+
+            if self.si.checkMotion(
+                _state_pointer(q_state),
+                _state_pointer(qj_state),
+            ):
+                edges.append((j, float(dist)))
+
+        return edges
+
+    def make_query_graph(self, start_q, goal_q, k=30):
+        vertices = self.graph_vertices
+        base_adj = self.graph_adj
+        n = len(vertices)
+
+        start_idx = n
+        goal_idx = n + 1
+
+        query_adj = [list(a) for a in base_adj]
+        query_adj.append([])
+        query_adj.append([])
+
+        start_edges = self.connect_temp_config(start_q, k=k)
+        goal_edges = self.connect_temp_config(goal_q, k=k)
+
+        for j, w in start_edges:
+            query_adj[start_idx].append((j, w))
+            query_adj[j].append((start_idx, w))
+
+        for j, w in goal_edges:
+            query_adj[goal_idx].append((j, w))
+            query_adj[j].append((goal_idx, w))
+
+        return query_adj, start_idx, goal_idx
+
+    def graph_query(
+        self,
+        start,
+        goal,
+        max_attempts=5,
+        k=30,
+        smooth_path=True,
+        num_waypoints=200,
+    ):
+        query_adj, s_idx, g_idx = self.make_query_graph(start, goal, k=k)
+        blocked_edges = set()
+        blocked_vertices = set()
+
+        for _ in range(max_attempts):
+            # idx_path = dijkstra(
+            #     query_adj,
+            #     s_idx,
+            #     g_idx,
+            #     blocked_edges=blocked_edges,
+            #     blocked_vertices=blocked_vertices,
+            # )
+            idx_path = astar(
+                query_adj,
+                s_idx,
+                g_idx,
+                self.graph_vertices,
+                np.asarray(start, dtype=float),
+                np.asarray(goal, dtype=float),
+                blocked_edges=blocked_edges,
+                blocked_vertices=blocked_vertices,
+            )
+            if idx_path is None:
+                return None
+
+            q_path = self.idx_path_to_waypoints(idx_path, start, goal)
+            valid, failure = self.validate_np_path_and_bad_edge(q_path)
+
+            if valid:
+                path = self.np_path_to_path_geometric(q_path)
+
+                if smooth_path:
+                    ps = og.PathSimplifier(self.si)
+                    try:
+                        ps.ropeShortcutPath(path)
+                    except KeyboardInterrupt:
+                        raise
+                    except Exception:
+                        if hasattr(ps, "shortcutPath"):
+                            ps.shortcutPath(path)
+
+                    ps.smoothBSpline(path)
+
+                if num_waypoints is not None:
+                    path.interpolate(int(num_waypoints))
+
+                # # Recheck final path after smoothing/interpolation.
+                # validation = self.validate_path_with_prefix(path)
+                valid = self.validate_path(path)
+                # if not validation["valid"]:
+                if not valid:
+                    return None
+
+                return np.array(
+                    [
+                        [s[i] for i in range(self.n_dof)]
+                        for s in path.getStates()
+                    ],
+                    dtype=float,
+                )
+
+            if failure is None:
+                return None
+
+            if failure[0] == "edge":
+                _, path_i, path_j = failure
+                u = idx_path[path_i]
+                v = idx_path[path_j]
+                blocked_edges.add((u, v))
+                blocked_edges.add((v, u))
+
+            elif failure[0] == "state":
+                _, path_i = failure
+                bad_v = idx_path[path_i]
+
+                if bad_v in (s_idx, g_idx):
+                    return None
+
+                blocked_vertices.add(bad_v)
+
+        return None
+
+    def numpy_to_state(self, q):
+        s = _make_ompl_state(self.si.getStateSpace())
+        for i in range(self.n_dof):
+            s[i] = float(q[i])
+        return s
+
+    def idx_path_to_waypoints(self, idx_path, start_q, goal_q):
+        n = len(self.graph_vertices)
+        out = []
+
+        for idx in idx_path:
+            if idx < n:
+                out.append(self.graph_vertices[idx])
+            elif idx == n:
+                out.append(np.asarray(start_q, dtype=float))
+            elif idx == n + 1:
+                out.append(np.asarray(goal_q, dtype=float))
+
+        return np.asarray(out)
+
+    def np_path_to_path_geometric(self, q_path):
+        path = og.PathGeometric(self.si)
+
+        for q in q_path:
+            s = self.numpy_to_state(q)
+            path.append(_state_pointer(s))
+
+        return path
+
+    def validate_np_path_and_bad_edge(self, q_path):
+        if q_path is None or len(q_path) == 0:
+            return False, None
+
+        states = [self.numpy_to_state(q) for q in q_path]
+
+        for i, s in enumerate(states):
+            if not self.validity_checker(_state_pointer(s)):
+                return False, ("state", i)
+
+        for i in range(len(states) - 1):
+            if not self.si.checkMotion(
+                _state_pointer(states[i]),
+                _state_pointer(states[i + 1]),
+            ):
+                return False, ("edge", i, i + 1)
+
+        return True, None
+
+
+class ERTConnectPlanner(OMPLPlanner):
+    def __init__(self, robot, data=None):
+        if not hasattr(og, "ERTConnect"):
+            raise ImportError(
+                "Rebuild and pip install ~/Github/ompl/py-bindings with ERTConnect enabled"
+            )
+        super().__init__(robot, data, planner="ERTConnect")
+
+    def prepare_experience(self, waypoints):
+        points = np.asarray(waypoints, dtype=float)
+        if (
+            points.ndim != 2
+            or points.shape[1] != self.n_dof
+            or len(points) < 2
+        ):
+            raise ValueError(
+                "Experience must contain at least two joint configurations"
+            )
+        if not np.isfinite(points).all():
+            raise ValueError("Experience contains nonfinite values")
+        path = self.np_path_to_path_geometric(points)
+        # A short root + goal path needs sufficient phase resolution for ERT.
+        path.interpolate(max(200, path.getStateCount()))
+        return path
+
+    def solve_experience(self, start, goal, experience, timeout=3.0):
+        """Return path, solve seconds, online seconds, and independently checked success.
+
+        Online time includes copying the prior, query setup and solution extraction.
+        Independent collision/endpoint verification is outside the planning timer.
+        No smoothing is applied, matching the unsmoothed planning-time baseline.
+        """
+        begin = time.perf_counter()
+        self.ss.clear()
+        self.planner.setExperience(experience)
+        self.ss.setStartAndGoalStates(
+            self.numpy_to_state(start), self.numpy_to_state(goal)
+        )
+        status = self.ss.solve(float(timeout))
+        solve_seconds = self.ss.getLastPlanComputationTime()
+        path = None
+        points = np.empty((0, self.n_dof))
+        if status == ob.PlannerStatus.EXACT_SOLUTION:
+            path = self.ss.getSolutionPath()
+            points = np.array(
+                [[s[j] for j in range(self.n_dof)] for s in path.getStates()]
+            )
+        online_seconds = time.perf_counter() - begin
+        valid = bool(
+            len(points)
+            and np.allclose(points[0], start, atol=1e-6)
+            and np.allclose(points[-1], goal, atol=1e-6)
+            and self.validate_path(path)
+        )
+        self.ss.clear()
+        return points, solve_seconds, online_seconds, valid
+
+
+import heapq
+import math
+
+
+def dijkstra(
+    adj, start_idx, goal_idx, blocked_edges=None, blocked_vertices=None
+):
+    if blocked_edges is None:
+        blocked_edges = set()
+    if blocked_vertices is None:
+        blocked_vertices = set()
+
+    n = len(adj)
+    dist = np.full(n, np.inf)
+    parent = np.full(n, -1, dtype=np.int64)
+
+    dist[start_idx] = 0.0
+    pq = [(0.0, start_idx)]
+
+    while pq:
+        d, u = heapq.heappop(pq)
+
+        if u in blocked_vertices and u not in (start_idx, goal_idx):
+            continue
+
+        if d != dist[u]:
+            continue
+        if u == goal_idx:
+            break
+
+        for v, w in adj[u]:
+            if v in blocked_vertices and v not in (start_idx, goal_idx):
+                continue
+            if (u, v) in blocked_edges or (v, u) in blocked_edges:
+                continue
+
+            nd = d + w
+            if nd < dist[v]:
+                dist[v] = nd
+                parent[v] = u
+                heapq.heappush(pq, (nd, v))
+
+    if not np.isfinite(dist[goal_idx]):
+        return None
+
+    path = []
+    cur = goal_idx
+    while cur != -1:
+        path.append(cur)
+        cur = parent[cur]
+
+    return path[::-1]
+
+
+def astar(
+    adj,
+    start_idx,
+    goal_idx,
+    vertices,
+    start_q,
+    goal_q,
+    blocked_edges=None,
+    blocked_vertices=None,
+):
+    if blocked_edges is None:
+        blocked_edges = set()
+    if blocked_vertices is None:
+        blocked_vertices = set()
+
+    n_graph = len(vertices)
+    n_total = len(adj)
+
+    def q_of(idx):
+        if idx < n_graph:
+            return vertices[idx]
+        elif idx == start_idx:
+            return start_q
+        elif idx == goal_idx:
+            return goal_q
+        raise IndexError(idx)
+
+    def heuristic(idx):
+        return np.linalg.norm(q_of(idx) - goal_q)
+
+    g_score = np.full(n_total, np.inf)
+    parent = np.full(n_total, -1, dtype=np.int64)
+
+    g_score[start_idx] = 0.0
+    pq = [(heuristic(start_idx), 0.0, start_idx)]
+
+    while pq:
+        f, g, u = heapq.heappop(pq)
+
+        if g != g_score[u]:
+            continue
+
+        if u == goal_idx:
+            break
+
+        if u in blocked_vertices and u not in (start_idx, goal_idx):
+            continue
+
+        for v, w in adj[u]:
+            if v in blocked_vertices and v not in (start_idx, goal_idx):
+                continue
+            if (u, v) in blocked_edges or (v, u) in blocked_edges:
+                continue
+            new_g = g + w
+            if new_g < g_score[v]:
+                g_score[v] = new_g
+                parent[v] = u
+                heapq.heappush(pq, (new_g + heuristic(v), new_g, v))
+
+    if not np.isfinite(g_score[goal_idx]):
+        return None
+
+    path = []
+    cur = goal_idx
+    while cur != -1:
+        path.append(cur)
+        cur = parent[cur]
+
+    return path[::-1]
 
 
 def euclidean_path_length(traj):

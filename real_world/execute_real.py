@@ -16,8 +16,8 @@ from coad.planning import OMPLPlanner
 from geometry.trajectory import Trajectory, SplineTrajectory, TOPPRATrajectory
 
 from real_world.physical_robot import PhysicalUR10
-from experiments.benchmark_baselines import BoxGrid
-from experiments.benchmark_baselines import Library
+from experiments.indexing import BoxGrid
+from experiments.experience_library import Library
 
 
 def load_library_and_adapter(
@@ -204,8 +204,8 @@ def main(method="adaptation", adaptation_method="grr"):
                     robot,
                     home_qpos,
                     map_data,
+                    root_data,
                     solved_keys,
-                    task_paths,
                     data,
                 )
                 path, library_time, lib_query_success = library.solve(

@@ -53,6 +53,11 @@ class Adapter:
 
     def path_validity_check(self, path):
         """Check validity of the whole path"""
+        if len(path) == 0:
+            return False
+        env = getattr(self.robot, "tcr_env", None)
+        if env is not None and not env.validate_cell_goal(self.robot, path[-1]):
+            return False
         for i in range(len(path) - 1):
             q1 = path[i]
             q2 = path[i + 1]
@@ -72,6 +77,9 @@ class Adapter:
         reached, new_goal_joint = self.ik_solver.solve(
             target, current=ref_joint, use_col=False
         )
+        env = getattr(self.robot, "tcr_env", None)
+        if reached and env is not None and not env.validate_cell_goal(self.robot, new_goal_joint):
+            return False, curr_goal_joint
         return reached, new_goal_joint
 
 
@@ -86,9 +94,14 @@ class LinearAdapter(Adapter):
     def compress(self, center, nb_path, goal_refinement=True):
         """Compress the nb_path into the center_path"""
         # Get end goal for neighbor
-        q_goal = nb_path[-1]
+        
+        if nb_path.ndim == 1:
+            q_goal = nb_path
+        else:
+            q_goal = nb_path[-1]
         if goal_refinement:
-            reached, q = self.ik_refinement(center[-1], nb_path[-1])
+            # reached, q = self.ik_refinement(center[-1], nb_path[-1])
+            reached, q = self.ik_refinement(center[-1], q_goal)
             if reached:
                 q_goal = q
 
@@ -115,9 +128,13 @@ class GRRAdapter(LinearAdapter):
     def compress(self, center, nb_path, goal_refinement=True):
         """Compress the nb_path into the center_path"""
         # Get end goal for neighbor
-        q_goal = nb_path[-1]  # original end goal
+        if nb_path.ndim == 1:
+            q_goal = nb_path
+        else:
+            q_goal = nb_path[-1]
         if goal_refinement:
-            reached, q = self.ik_refinement(center[-1], nb_path[-1])
+            # reached, q = self.ik_refinement(center[-1], nb_path[-1])
+            reached, q = self.ik_refinement(center[-1], q_goal)
             if reached:
                 q_goal = q
 
@@ -224,9 +241,14 @@ class DMPAdapter(Adapter):
         Return (ok, q_goal).
         If ok=True, the neighbor is represented only by q_goal.
         """
-        q_goal = nb_path[-1]  # original end goal
+
+        if nb_path.ndim == 1:
+            q_goal = nb_path
+        else:
+            q_goal = nb_path[-1]
         if goal_refinement:
-            reached, q = self.ik_refinement(center.goal, nb_path[-1])
+            # reached, q = self.ik_refinement(center[-1], nb_path[-1])
+            reached, q = self.ik_refinement(center.goal, q_goal)
             if reached:
                 q_goal = q
 
@@ -300,9 +322,14 @@ class TrajOptAdapter(Adapter):
 
     def compress(self, center, nb_path, goal_refinement=True):
         """Compress the nb_path into the center_path"""
-        q_goal = nb_path[-1]  # original end goal
+        
+        if nb_path.ndim == 1:
+            q_goal = nb_path
+        else:
+            q_goal = nb_path[-1]
         if goal_refinement:
-            reached, q = self.ik_refinement(center[-1], nb_path[-1])
+            # reached, q = self.ik_refinement(center[-1], nb_path[-1])
+            reached, q = self.ik_refinement(center[-1], q_goal)
             if reached:
                 q_goal = q
 

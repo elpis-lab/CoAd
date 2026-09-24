@@ -124,12 +124,16 @@ class Panda(MujocoRobot):
         "joint6",
         "joint7",
     ]
-    HOME_POS = [0, 0, 0, -np.pi / 2, 0, np.pi / 2, -np.pi / 4]
+    HOME_POS_DEFAULT = [0, 0, 0, -np.pi / 2, 0, np.pi / 2, -np.pi / 4]
+
+    # Home pose for under table
+    HOME_POS_UNDER_TABLE = [-1.6362, -1.7276, 2.151, -1.0680, -2.2128, 2.4997, 1.1928]
+
     FINGER = ["finger_joint1", "finger_joint2"]
     FINGER_OPEN = [0.04, 0.04]
     FINGER_CLOSED = [0.0, 0.0]
 
-    def __init__(self, model, data=None, visualize=False):
+    def __init__(self, model, data=None, visualize=False, home_pose="default"):
         """Initialize PandaRobot"""
         MujocoRobot.__init__(
             self,
@@ -139,16 +143,127 @@ class Panda(MujocoRobot):
             data=data,
             collision_geom_group=3,
             ee_name="attachment_site",
-            visualize=visualize,
+            visualize=visualize
         )
+
+        if home_pose == "default":
+            self.home_pos = self.HOME_POS_DEFAULT.copy()
+        elif home_pose == "new":
+            self.home_pos = self.HOME_POS_UNDER_TABLE.copy()
+        else:
+            raise ValueError(
+                f"Unknown Panda home pose: {home_pose!r}. "
+                "Expected 'default' or 'new'."
+            )
+
         # Send to home
-        self.set_joint_qpos(self.HOME_POS)
+        self.set_joint_qpos(self.home_pos)
 
         # Open the gripper
         for i, finger in enumerate(self.FINGER):
             j_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, finger)
             self.data.qpos[model.jnt_qposadr[j_id]] = self.FINGER_OPEN[i]
         mujoco.mj_forward(model, self.data)
+
+class G1(MujocoRobot):
+    """Unitree G1 specialization"""
+
+    LEFT_ARM = [
+        "left_shoulder_pitch_joint",
+        "left_shoulder_roll_joint",
+        "left_shoulder_yaw_joint",
+        "left_elbow_joint",
+        "left_wrist_roll_joint",
+    ]
+
+    RIGHT_ARM = [
+        "right_shoulder_pitch_joint",
+        "right_shoulder_roll_joint",
+        "right_shoulder_yaw_joint",
+        "right_elbow_joint",
+        "right_wrist_roll_joint",
+    ]
+
+    def __init__(self, model, data=None, visualize=False):
+        """Initialize G1Robot"""
+        MujocoRobot.__init__(
+            self,
+            model,
+            joint_names=self.LEFT_ARM,
+            root_link="pelvis",
+            data=data,
+            collision_geom_group=3,
+            ee_name="left_attachment_site",
+            visualize=visualize,
+        )
+
+        print("\nBodies:")
+        for i in range(model.nbody):
+            print(mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, i))
+
+        print("\nGeoms:")
+        for i in range(model.ngeom):
+            print(mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, i))
+
+        print("\nSites:")
+        for i in range(model.nsite):
+            print(mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_SITE, i))
+
+# Double panda for visualization
+
+# class Panda(MujocoRobot):
+#     """Franka Panda specialization (supports multiple instances via name prefix)."""
+
+#     ARM = [
+#         "joint1",
+#         "joint2",
+#         "joint3",
+#         "joint4",
+#         "joint5",
+#         "joint6",
+#         "joint7",
+#     ]
+#     HOME_POS = [0, 0, 0, -np.pi / 2, 0, np.pi / 2, -np.pi / 4]
+#     FINGER = ["finger_joint1", "finger_joint2"]
+#     FINGER_OPEN = [0.04, 0.04]
+#     FINGER_CLOSED = [0.0, 0.0]
+
+#     def __init__(self, model, data=None, visualize=False, prefix: str = ""):
+#         """
+#         Initialize PandaRobot.
+
+#         prefix: prepended to all MJCF names for this robot instance.
+#                 Examples: "", "f1_", "f2_"
+#         """
+#         self.prefix = prefix
+
+#         def p(name: str) -> str:
+#             return f"{self.prefix}{name}" if self.prefix else name
+
+#         arm_joints = [p(j) for j in self.ARM]
+#         finger_joints = [p(j) for j in self.FINGER]
+
+#         MujocoRobot.__init__(
+#             self,
+#             model,
+#             joint_names=arm_joints,
+#             root_link=p("link0"),
+#             data=data,
+#             collision_geom_group=3,
+#             ee_name=p("attachment_site"),
+#             visualize=visualize,
+#         )
+
+#         # Send to home (arm joints only)
+#         self.set_joint_qpos(self.HOME_POS)
+
+#         # Open the gripper (finger slide joints)
+#         for i, finger in enumerate(finger_joints):
+#             j_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, finger)
+#             self.data.qpos[model.jnt_qposadr[j_id]] = float(self.FINGER_OPEN[i])
+
+#         mujoco.mj_forward(model, self.data)
+
 
 
 class UR10(MujocoRobot):
@@ -165,6 +280,8 @@ class UR10(MujocoRobot):
     # HOME_POS = [0, -1.7, 2, -1.87, -np.pi / 2, 0]
     HOME_POS = [0, -1.7, 1.75, -1.9, -np.pi / 2, 0]
     HOME_POS = [2.0309, -1.095, 1.5799, -2.071, -1.5938, 0.5060]
+    HOME_POS = [2.0309, -1.095, 1.55, -2.071, -1.5938, 0.5060]
+
     FINGER = ["rh_r1", "rh_l1", "rh_r2", "rh_l2"]
     FINGER_OPEN = [0, 0, 0, 0]
     FINGER_CLOSED = [1.12, 1.12, 1.12, 1.12]
@@ -201,9 +318,13 @@ class FetchArm(MujocoRobot):
     FINGER = ["r_gripper_finger_joint", "l_gripper_finger_joint"]
     FINGER_CLOSED = [0, 0]
     FINGER_OPEN = [0.05, 0.05]
-    HOME_POS = [0, -1.5, 0, -np.pi, -np.pi / 2, 0, 0, 0]
+    
+    HOME_POS_EASY = [0, -1.5, 0, -np.pi, -np.pi / 2, 0, 0, 0]
 
-    def __init__(self, model, data=None, visualize=False):
+    # Harder home pose
+    HOME_POS_HARD = [0.1, 1.32, 1.4, -0.2, 1.72, 0, 1.66, 0.1]
+
+    def __init__(self, model, data=None, visualize=False, home_pose="default"):
         """Initialize FetchRobot"""
         MujocoRobot.__init__(
             self,
@@ -215,8 +336,19 @@ class FetchArm(MujocoRobot):
             ee_name="attachment_site",
             visualize=visualize,
         )
+
+        if home_pose == "default":
+            self.home_pos = self.HOME_POS_EASY.copy()
+        elif home_pose == "new":
+            self.home_pos = self.HOME_POS_HARD.copy()
+        else:
+            raise ValueError(
+                f"Unknown Fetch home pose: {home_pose!r}. "
+                "Expected 'default' or 'new'."
+            )
+
         # Send to home
-        self.set_joint_qpos(self.HOME_POS)
+        self.set_joint_qpos(self.home_pos)
 
         # Open the gripper
         for i, finger in enumerate(self.FINGER):

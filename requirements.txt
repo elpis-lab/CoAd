@@ -4,3 +4,5 @@ osqp
 tqdm 
 scikit-learn
 scipy
+trimesh
+matplotlib

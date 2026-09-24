@@ -28,3 +28,14 @@ def build_task_nn(keys):
     bin_poses = (bins[:, :, 0] + bins[:, :, 1]) / 2
     nn = BallTree(bin_poses, metric=env_distance)
     return nn, bin_poses
+
+def has_contact_face(env):
+    return env.env_details["env_name"] == "allstable"
+
+
+def split_key(key):
+    return key[0], key[1:]   # face, numeric intervals
+
+def key_to_center(numeric_key):
+    key_arr = np.array(numeric_key, dtype=float)
+    return (key_arr[:, 0] + key_arr[:, 1]) / 2

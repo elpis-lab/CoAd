@@ -1,60 +1,48 @@
-\#!/usr/bin/env bash
+#!/usr/bin/env bash
 set -euo pipefail
-root_dir="$(dirname "$(realpath "$0")")/.."
-script_dir="$root_dir/coad"
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-# Start timer
-start_time=$(date +%s)
+# Edit these lists and settings before running this file.
+robots=(panda fetch)
+envs=(table cage shelf)
+methods=(grr opt dmp)
+ik=neighbor
+planner=RRTConnect
+neighbors=1000
+workers=2
+generate_data=false
+compress=false
+overwrite_data=false
 
-robots=(
-    #panda
-    #ur10
-    fetch
-)
-envs=(
-    cage
-    table
-    shelf
-)
-adaptations=(
-    grr
-    opt
-    dmp
-)
-ik="neighbor"
-planner="RRTConnect"
-overwrite_condensed_graph=false
+data_flags=()
+if [[ "$overwrite_data" == true ]]; then
+  data_flags=(--overwrite)
+fi
 
 for robot in "${robots[@]}"; do
   for env in "${envs[@]}"; do
-    # Condense for each adaptation
-    for adaptation in "${adaptations[@]}"; do
-      echo "=== Condensing: ${robot} in ${env}, adaptation=${adaptation} ==="
+    if [[ "$generate_data" == true ]]; then
+      python3 coad/generate_task_set.py \
+        --robot "$robot" --env "$env" "${data_flags[@]}"
+      python3 coad/generate_joint_goal_set_parallelized.py \
+        --robot "$robot" --env "$env" --ik "$ik" \
+        --num_workers "$workers" "${data_flags[@]}"
+      python3 coad/generate_task_paths_parallelized.py \
+        --robot "$robot" --env "$env" --ik "$ik" --planner "$planner" \
+        --num_workers "$workers" "${data_flags[@]}"
+    fi
 
-      if [ "$overwrite_condensed_graph" = true ]; then
-        python "$script_dir/condense_task_paths.py" \
-          --robot "$robot" \
-          --env "$env" \
-          --ik "$ik" \
-          --planner "$planner" \
-          --adaptation "$adaptation" \
-          --overwrite
-      else
-        python "$script_dir/condense_task_paths.py" \
-          --robot "$robot" \
-          --env "$env" \
-          --ik "$ik" \
-          --planner "$planner" \
-          --adaptation "$adaptation"
-      fi
+    if [[ "$compress" == true ]]; then
+      for method in "${methods[@]}"; do
+        if [[ "$method" == full ]]; then continue; fi
+        python3 coad/generate_condensed_task_paths.py \
+          --robot "$robot" --env "$env" --ik "$ik" --planner "$planner" \
+          --adaptation "$method" --n_neighbors "$neighbors" "${data_flags[@]}"
+      done
+    fi
 
-      echo "Finished adaptation=${adaptation}"
-    done
-
+    python3 experiments/benchmark_adaptations.py \
+      --robot "$robot" --env "$env" --ik "$ik" --planner "$planner" \
+      --n-neighbors "$neighbors" --methods "${methods[@]}" "$@"
   done
 done
-
-end_time=$(date +%s)
-elapsed=$(( end_time - start_time ))
-printf "=== All planning jobs completed in %02d:%02d:%02d ===\n" \
-  $((elapsed/3600)) $((elapsed%3600/60)) $((elapsed%60))
