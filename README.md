@@ -145,7 +145,7 @@ Experiment entry points are organized by purpose:
 | Adaptation and planning summaries | `experiments/summarize_adaptations.py`, `experiments/summarize_planning.py` |
 | Planning time and path-quality plots | `experiments/plot_planning.py` |
 | Environment, goals, task regions, and paths | `experiments/visualize_*.py` |
-| Moving conveyor pick-and-sort | `experiments/run_conveyor_experiment.py` |
+| Simulated conveyor pick-and-sort | `experiments/run_conveyor_experiment.py` |
 
 #### Benchmark adaptation methods
 
